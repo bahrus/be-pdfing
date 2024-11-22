@@ -7,6 +7,6 @@ Enhances the input element with type=file so that files of type pdf can be opene
     "parse": {
         "regExp": "/(?<Course>\b[A-Z]{3,4}\\s+\\d{3}[L]?)(?<Description>.*?)(?<Grade>\\s[A-F][+-]?\\s)/g"
     },
-    "writeTo": "indexedDB://myDB/$0:dataset:StudentId/"
+    "writeTo": "indexedDB://myDB/transcriptTable[$0:dataset:StudentId/"
 '>
 ```
