@@ -106,3 +106,44 @@ Make the stages and tiers explicit and load each one only when it's used:
 2. **v1 scope:** are you OK with v1 being deterministic only (layout plus rules), with built-in AI as v2? Or do you want the Prompt API in from the start, since it's the more interesting part?
 3. **Output granularity:** one record per *file* (`{student, terms: [{term, courses: []}], totals}`), or one store entry per *course row*? This affects the `writeTo` design.
 4. **Generic vs. transcript-specific:** should `"transcript"` be a built-in preset in be-pdfing, or should be-pdfing stay generic and keep transcript knowledge in demos/docs?
+
+## Bruce's Follow up question
+
+Would Chrome's built in AI Gemini model be able to parse the file bytes, obviating the need for the firefox library?
+
+## Claude's Response to Follow up
+
+**Short answer: no. pdf.js (or something like it) is still needed, even with the built-in model.**
+
+### What the Prompt API accepts
+
+According to Chrome's current Prompt API docs, a `LanguageModel` session accepts three input types, declared up front in `expectedInputs`:
+
+- **text**
+- **image** (`Blob`, `<img>`, `<canvas>`, `ImageBitmap`, video frame, etc.)
+- **audio**
+
+There's no PDF or "document" input type. Output is text only, optionally constrained by a JSON Schema. Multimodal (image/audio) input is also newer and less settled than text input. MDN dates it to Chrome 148, and there's a `prompt-api-for-gemini-nano-multimodal-input` flag for development, so I'd re-check its status before depending on it.
+
+### Why you can't just hand it the bytes
+
+1. **There's no slot for them.** A PDF `Blob` passed as an "image" isn't a format the browser can decode as an image. I'd expect a `NotSupportedError` or a decode failure.
+2. **Even as text, raw PDF bytes are close to useless.** The page content in a PDF is usually *compressed* (FlateDecode streams), and the text often uses font-specific glyph encodings, so the actual characters aren't present in readable form. Decoding all that is exactly what pdf.js does. Asking a small on-device model to do it from raw bytes would fail, and the bytes would blow through its context window anyway.
+3. **Chrome's own PDF engine (PDFium) isn't available to page JavaScript.** The browser can *display* PDFs, but it doesn't expose text extraction or rendering to scripts.
+
+### Where AI can still replace part of the pipeline
+
+The model can replace the **Structure** step (and, with images, some of the layout heuristics), but not the **Extract** step. There are two routes:
+
+- **Text route (what I recommended before):** pdf.js extracts the text and lines, then Gemini Nano turns the lines into JSON records using `responseConstraint`. This is the most reliable on-device option.
+- **Image route:** pdf.js renders each page to a `<canvas>`, then the canvas is passed to Gemini Nano as an image with a prompt like "extract the courses as JSON." That sidesteps the two-column and reading-order problems, and it would also handle **scanned** transcripts without Tesseract. But it **still uses pdf.js**, just for rendering instead of text extraction. A small model also reading dense, small-font tables from an image is likely to be *less* accurate than the text route. It would be a good option to try, maybe as a fallback when a page has no text layer.
+
+### The one way to skip pdf.js entirely
+
+Cloud models such as Claude accept the PDF file directly and do the decoding and rendering on the server side. That would remove pdf.js, but it brings back the trade-offs from section 4b: the transcript leaves the device, and you need a server-side proxy to hold the API key. That fits the `"endpoint"` strategy, not the built-in one.
+
+### Effect on the plan
+
+There's no change to v1: pdf.js remains the foundation. For v2 I'd add `"structure": {"via": "builtin-ai", "input": "text" | "image"}`, so we can compare the two routes on real transcripts. `"image"` would also be the natural way to handle scanned pages.
+
+Sources: [Chrome: The Prompt API](https://developer.chrome.com/docs/ai/prompt-api?hl=en), [MDN: Multimodal prompts](https://developer.mozilla.org/en-US/docs/Web/API/Prompt_API/Multimodal), [MDN (de): Multimodal prompts](https://developer.mozilla.org/de/docs/Web/API/Prompt_API/Multimodal)
