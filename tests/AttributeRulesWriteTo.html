@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AttributeRulesWriteTo</title>
+    <!-- #include virtual="/imports.html" -->
+    <be-hive>
+        <script type=emc src="be-pdfing/emc.json"></script>
+    </be-hive>
+    <script type=module>
+        import 'be-hive/be-hive.js';
+    </script>
+</head>
+<body>
+    <!-- Two side-by-side tables per row of the page (Grade 9 | Grade 10, ...). -->
+    <input id="subject" type="file" accept=".pdf" be-pdfing='{
+        "rules": [
+            {"pattern": "Student:\\t(?<student>[^\\t]+)", "sets": "document"},
+            {"pattern": "Grade (?<gradeLevel>\\d+)\\tGr\\tCr", "sets": true},
+            {"pattern": "(?<course>[^\\t]+)\\t(?<grade>[A-F][+-]?|P)\\t(?<credits>\\d+(?:\\.\\d+)?)", "emits": "courses"}
+        ],
+        "writeTo": "sessionStorage://AttributeRulesWriteTo-{file.name}"
+    }'>
+    <div id="target"></div>
+    <script type=module>
+        const key = 'AttributeRulesWriteTo-home-school-transcript-example.pdf';
+        window.addEventListener('message', e => {
+            if(Array.isArray(e.data) && e.data.includes(`sessionStorage://${key}`)){
+                window.stored = JSON.parse(sessionStorage.getItem(key));
+                target.setAttribute('mark', 'good');
+            }
+        });
+        function whenResolved(){
+            if(subject.enh?.bePdfing?.resolved === true){
+                target.setAttribute('ready', '');
+                return;
+            }
+            requestAnimationFrame(whenResolved);
+        }
+        whenResolved();
+    </script>
+</body>
+</html>

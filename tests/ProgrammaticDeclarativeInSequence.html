@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProgrammaticDeclarativeInSequence</title>
+    <!-- #include virtual="/imports.html" -->
+</head>
+<body>
+    <!-- Register first, then attach declaratively via `enh.set`. -->
+    <input id="subject" type="file" accept=".pdf">
+    <div id="target"></div>
+    <script type=module>
+        import {defBePdfing} from '/def.js';
+        await defBePdfing(document.body);
+        subject.enh.set.bePdfing.rules = [
+            {pattern: String.raw`Grade (?<gradeLevel>\d+)\tGr\tCr`, sets: true},
+            {pattern: String.raw`(?<course>[^\t]+)\t(?<grade>[A-F][+-]?|P)\t(?<credits>\d+(?:\.\d+)?)`, emits: 'courses'},
+        ];
+        subject.enh.bePdfing.writeTo = 'sessionStorage://ProgrammaticDeclarativeInSequence-{file.name}';
+        const key = 'ProgrammaticDeclarativeInSequence-home-school-transcript-example.pdf';
+        window.addEventListener('message', e => {
+            if(Array.isArray(e.data) && e.data.includes(`sessionStorage://${key}`)){
+                window.stored = JSON.parse(sessionStorage.getItem(key));
+                target.setAttribute('mark', 'good');
+            }
+        });
+        function whenResolved(){
+            if(subject.enh.bePdfing?.resolved === true){
+                target.setAttribute('ready', '');
+                return;
+            }
+            requestAnimationFrame(whenResolved);
+        }
+        whenResolved();
+    </script>
+</body>
+</html>

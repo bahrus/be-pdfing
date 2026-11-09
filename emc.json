@@ -1,0 +1,47 @@
+{
+    "matching": "input[type=\"file\"]",
+    "enhConfig": {
+        "enhKey": "bePdfing",
+        "spawn": "be-pdfing/be-pdfing.js",
+        "withAttrs": {
+            "base": "be-pdfing",
+            "_base": {
+                "instanceOf": "Object",
+                "mapsTo": "."
+            }
+        }
+    },
+    "customData": {
+        "weakRef": {
+            "properties": [
+                "enhancedElement"
+            ]
+        },
+        "actions": {
+            "hydrate": {
+                "ifKeyIn": [
+                    "initialized"
+                ],
+                "ifAllOf": [
+                    "enhancedElement",
+                    "initialized"
+                ]
+            },
+            "structure": {
+                "ifKeyIn": [
+                    "extracted",
+                    "rules"
+                ],
+                "ifAllOf": [
+                    "extracted"
+                ]
+            },
+            "storeResults": {
+                "ifAllOf": [
+                    "results",
+                    "writeTo"
+                ]
+            }
+        }
+    }
+}

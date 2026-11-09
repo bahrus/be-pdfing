@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProgrammaticDeclarativeOutOfSequence</title>
+    <!-- #include virtual="/imports.html" -->
+</head>
+<body>
+    <!-- Attach via `enh.set` *before* the config is registered. -->
+    <input id="subject" type="file" accept=".pdf">
+    <div id="target"></div>
+    <script type=module>
+        import 'assign-gingerly/object-extension.js';
+        subject.enh.set.bePdfing.writeTo = 'sessionStorage://ProgrammaticDeclarativeOutOfSequence-{file.name}';
+        const key = 'ProgrammaticDeclarativeOutOfSequence-sample-transcript.pdf';
+        window.addEventListener('message', e => {
+            if(Array.isArray(e.data) && e.data.includes(`sessionStorage://${key}`)){
+                window.stored = JSON.parse(sessionStorage.getItem(key));
+                target.setAttribute('mark', 'good');
+            }
+        });
+        const {defBePdfing} = await import('/def.js');
+        await defBePdfing(document.body);
+        function whenResolved(){
+            if(subject.enh.bePdfing?.resolved === true){
+                target.setAttribute('ready', '');
+                return;
+            }
+            requestAnimationFrame(whenResolved);
+        }
+        whenResolved();
+    </script>
+</body>
+</html>

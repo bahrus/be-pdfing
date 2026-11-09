@@ -1,0 +1,63 @@
+{
+  "name": "be-pdfing",
+  "version": "0.0.0",
+  "keywords": [
+    "web-components",
+    "custom-attribute",
+    "enhancement",
+    "decorate",
+    "behavior",
+    "pdf",
+    "pdf-parsing",
+    "table-extraction"
+  ],
+  "description": "Enhance the input element so it can declaratively read PDF files and extract lines and table rows from them.",
+  "type": "module",
+  "main": "be-pdfing.js",
+  "module": "be-pdfing.js",
+  "exports": {
+    ".": "./be-pdfing.js",
+    "./be-pdfing.js": "./be-pdfing.js",
+    "./extractLines.js": "./extractLines.js",
+    "./applyRules.js": "./applyRules.js",
+    "./def.js": "./def.js",
+    "./emc.json": "./emc.json"
+  },
+  "files": [
+    "*.js",
+    "*.json",
+    "types/be-pdfing/types.d.ts"
+  ],
+  "types": "types/be-pdfing/types.d.ts",
+  "scripts": {
+    "build": "node emc.mjs > emc.json",
+    "vendor": "node -e \"const fs=require('fs');fs.mkdirSync('vendor',{recursive:true});for(const f of ['pdf.min','pdf.worker.min'])fs.copyFileSync('node_modules/pdfjs-dist/build/'+f+'.mjs','vendor/'+f+'.js')\"",
+    "preserve": "npm run vendor",
+    "serve": "node ./node_modules/spa-ssi/serve.js",
+    "test": "playwright test",
+    "safari": "npx playwright wk http://localhost:8000",
+    "update": "ncu -u && npm install"
+  },
+  "dependencies": {
+    "assign-gingerly": "0.0.109",
+    "be-hive": "0.1.18",
+    "fifteenth": "0.0.8",
+    "mount-observer": "0.1.53",
+    "pdfjs-dist": "6.5.438",
+    "roundabout-lib": "0.0.38"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "spa-ssi": "0.0.31"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bahrus/be-pdfing.git"
+  },
+  "author": "Bruce Anderson <anderson.bruce.b@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/bahrus/be-pdfing/issues"
+  },
+  "homepage": "https://github.com/bahrus/be-pdfing#readme"
+}

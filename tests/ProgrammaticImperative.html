@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProgrammaticImperative</title>
+    <!-- #include virtual="/imports.html" -->
+</head>
+<body>
+    <!-- Fully imperative attachment: no attribute, no `.set` proxy -- just
+         `enh.get(emc)` plus direct property assignment. -->
+    <input id="subject" type="file" accept=".pdf">
+    <div id="target"></div>
+    <script type=module>
+        import {defBePdfing} from '/def.js';
+        const emc = await defBePdfing(document.body);
+        const bePdfing = subject.enh.get(emc);
+        Object.assign(bePdfing, {
+            rules: [
+                {pattern: String.raw`MO/YR: (?<moYr>\d\d/\d{4})\t(?:GRD )?LEV: (?<gradeLevel>\d+)`, sets: true},
+                {pattern: String.raw`(?<stateCode>\d{5})\t(?<courseCode>[^\t]+)\t(?<description>[^\t]+)\t(?<grade>[A-F][+-]?|P|W|I)\t(?<credEarn>\d+\.\d+)\t(?<credAttp>\d+\.\d+)(?:\t(?<dsg>[A-Z]{1,4})\b)?`, emits: 'courses'},
+            ],
+            writeTo: 'sessionStorage://ProgrammaticImperative-{file.name}',
+        });
+        window.loads = [];
+        subject.addEventListener('load', e => {
+            window.loads.push({enh: e.enh, records: e.results[0].records});
+            target.setAttribute('loads', String(window.loads.length));
+        });
+        // Changing the rules re-applies them to the lines already extracted.
+        window.switchRules = () => {
+            bePdfing.rules = [{pattern: String.raw`Cumulative\t(?<credEarn>[\d.]+)\t(?<credAttp>[\d.]+)\t(?<gpaPts>[\d.]+)\t(?<gpa>[\d.]+)`, emits: 'totals'}];
+        };
+        function whenResolved(){
+            if(subject.enh.bePdfing?.resolved === true){
+                target.setAttribute('ready', '');
+                return;
+            }
+            requestAnimationFrame(whenResolved);
+        }
+        whenResolved();
+    </script>
+</body>
+</html>

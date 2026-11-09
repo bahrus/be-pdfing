@@ -147,3 +147,70 @@ Cloud models such as Claude accept the PDF file directly and do the decoding and
 There's no change to v1: pdf.js remains the foundation. For v2 I'd add `"structure": {"via": "builtin-ai", "input": "text" | "image"}`, so we can compare the two routes on real transcripts. `"image"` would also be the natural way to handle scanned pages.
 
 Sources: [Chrome: The Prompt API](https://developer.chrome.com/docs/ai/prompt-api?hl=en), [MDN: Multimodal prompts](https://developer.mozilla.org/en-US/docs/Web/API/Prompt_API/Multimodal), [MDN (de): Multimodal prompts](https://developer.mozilla.org/de/docs/Web/API/Prompt_API/Multimodal)
+
+## Bruce's Response II
+
+Let's go in baby steps as you recommend.  I added two [sample](../demo/home-school-transcript-example.pdf) [transcripts](../demo/sample-transcript.pdf) but really I don't want things too tied to transcripts.  I think maybe "tables of information" is the focus.
+
+Let's please start with 
+
+> 1. **v1:** scaffold per `NewEnhancementInstructions.md`, then pdf.js layout extraction producing `lines`, then `rules` structuring, then `writeTo`. Playwright tests against fixture PDFs.
+
+## Claude's v1 Implementation Notes
+
+v1 is done. All 6 Playwright tests pass on Chromium, using your two sample PDFs as fixtures. I kept everything generic ("tables of information"). The transcript-specific knowledge lives only in the rules in the tests, the demo, and the README examples, and there's no transcript preset.
+
+### What your samples showed
+
+Both samples are **two-column** layouts, the hard case from my earlier notes:
+
+- In `home-school-transcript-example.pdf`, two tables sit side by side (Grade 9 | Grade 10, Grade 11 | Grade 12).
+- In `sample-transcript.pdf`, the left column runs five terms of courses, while the right column holds one term of courses and then a summary table.
+
+In both, pdf.js reports a left row and a right row with the same `y`, so each visual line holds one row from *each* column. `sample-transcript.pdf` also draws its footer first, so the items have to be sorted.
+
+### Design
+
+**1. Lines and cells ([extractLines.js](../extractLines.js)).** Text items are grouped into lines by baseline, top to bottom. Within a line, they're split into **cells** wherever the horizontal gap is wider than about one font height. `line.text` joins the cells with `\t`. For example:
+
+```
+00001	ENGL1	English 9	A	0.50	0.50	B	00011	ENGL3	English 11	A	0.50	0.50	B
+```
+
+So rule authors can use `\t` and `[^\t]+` ("one cell") instead of guessing at spaces. That one decision makes the regexes far more robust. Each cell also keeps its `x` and `width`. Rotated text is skipped, and so is "fake bold" (the same text drawn twice).
+
+**2. Rules ([applyRules.js](../applyRules.js)).** Rather than one regex, rules are an ordered list of `{pattern, flags?, emits?, sets?}`:
+
+- `emits: "courses"` adds a record per match, built from the named groups.
+- `sets: true` makes the named groups **context** for the records below it. The key decision is that context is **inherited only by records that overlap the heading horizontally**. That's what solves the two-column problem *without* detecting columns at all: "Grade 10" sits above the right half, so only right-half rows inherit it, even though they share lines with Grade 9 rows. I first considered splitting each page into columns by finding gutters, but tables have internal gutters too, so the overlap approach was both simpler and more reliable on your samples.
+- `sets: "document"` is for page-wide facts such as `Student: Albert Smith`. It applies to every later record.
+- Rules **claim** the text they match, in the order they're listed, so earlier rules take priority. A rule with neither `emits` nor `sets` just hides text, such as headers and footers.
+
+Results: `home-school` → 31 courses, each with the right `gradeLevel`. `sample-transcript` → 30 courses, each with the right `moYr`/`gradeLevel`, including the right column's 06/2020 term. The `Cumulative` totals row comes out as a separate collection.
+
+**3. The enhancement ([be-pdfing.js](../be-pdfing.js), [emc.mjs](../emc.mjs)).** It follows `NewEnhancementInstructions.md` and the addendum: plain class, roundabout, `initialized` gating, `def.js`, and all three attachment patterns tested. It has three actions:
+
+- `hydrate`: listens for `change`.
+- `structure`: runs when `extracted` **or `rules`** change. So reassigning `rules` re-applies them without re-reading the PDF, which the demo uses for live rule editing.
+- `storeResults`: `writeTo` through fifteenth. It writes `records` when there are rules, `lines` otherwise, with `{file.name}` and other placeholders substituted.
+
+Events are `load` (`event.results`, `event.enh`), `progress` (one per page), and `error` (a file that isn't a valid PDF). pdf.js is loaded by dynamic `import()` only once a file is selected.
+
+**4. Demo ([demo/index.html](../demo/index.html)).** Pick a PDF and you see the extracted lines on the right and the records as tables on the left, with a rules textarea and presets for both samples.
+
+### Things to know
+
+1. **spa-ssi serves `.mjs` as `text/html`**, because it treats `.mjs` requests as server-side includes. So Chrome refused to load pdf.js, which ships only `.mjs`. To work around it, `npm run serve` (via a `preserve` hook) copies pdf.js's two modules into a gitignored `vendor/` folder as `.js` files, and `imports.html` maps the `pdfjs-dist/build/...` specifiers there. The source code keeps the real specifiers, so consumers aren't affected. **A cleaner fix would be in spa-ssi itself:** serve an `.mjs` that has no `render` export as `text/javascript`. Want me to look at that?
+2. **The `types` submodule has a new `be-pdfing/types.d.ts`.** It needs committing there, as with be-literate.
+3. **The README's `"\b"` bug is fixed**, and the README now documents all of the above, including the programmatic-attachment section the addendum asks for.
+4. **No emoji shorthand yet.** Let me know if you'd like one (📑?).
+5. **Nothing is committed.**
+
+### Known limitations (candidates for later steps)
+
+- **Records come out in line order**, so side-by-side tables interleave: G9 row, G10 row, G9 row, and so on. Each record has the correct context, but you may want them grouped by column.
+- **Context never "ends."** A record inherits any earlier heading above it in its column, even one that belongs to a previous table. In `sample-transcript.pdf`, the `Cumulative` totals row inherits `moYr: 06/2020` from the course table above it. A possible fix would be a way for a rule to *clear* context, e.g. `"clears": true` on a heading such as `Report Period and Cumulative Summary`.
+- **Values are strings.** Number conversion (`"0.50"` → `0.5`) would be easy to add, e.g. `"types": {"credits": "number"}`.
+- **Multi-line cells** aren't joined. `sample-transcript.pdf`'s stacked column headers ("State / CRS / Code") come out as three lines. That doesn't matter for data rows.
+- **Scanned PDFs** produce no lines. That's the later OCR or AI-image tier.
+

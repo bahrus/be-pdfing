@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AttributeLines</title>
+    <!-- #include virtual="/imports.html" -->
+    <be-hive>
+        <script type=emc src="be-pdfing/emc.json"></script>
+    </be-hive>
+    <script type=module>
+        import 'be-hive/be-hive.js';
+    </script>
+</head>
+<body>
+    <!-- No rules:  just layout-aware lines. -->
+    <input id="subject" type="file" accept=".pdf" be-pdfing>
+    <div id="target"></div>
+    <script type=module>
+        const progress = [];
+        subject.addEventListener('progress', e => progress.push([e.page, e.numPages]));
+        subject.addEventListener('error', e => { window.pdfError = String(e.error); });
+        subject.addEventListener('load', e => {
+            window.loadInfo = {
+                enh: e.enh,
+                progress,
+                results: e.results.map(({file, numPages, lines, records}) => ({fileName: file.name, numPages, lines, records})),
+            };
+            target.setAttribute('mark', 'good');
+        });
+        function whenResolved(){
+            if(subject.enh?.bePdfing?.resolved === true){
+                target.setAttribute('ready', '');
+                return;
+            }
+            requestAnimationFrame(whenResolved);
+        }
+        whenResolved();
+    </script>
+</body>
+</html>

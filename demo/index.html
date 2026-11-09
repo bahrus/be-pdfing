@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>be-pdfing demo</title>
+    <!-- #include virtual="/imports.html" -->
+    <be-hive>
+        <script type=emc src="be-pdfing/emc.json"></script>
+    </be-hive>
+    <script type=module>
+        import 'be-hive/be-hive.js';
+    </script>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 1rem; }
+        .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        textarea { width: 100%; height: 14rem; font-family: monospace; font-size: 0.8rem; }
+        pre { background: #f4f4f4; padding: 0.5rem; overflow: auto; max-height: 30rem; font-size: 0.75rem; tab-size: 12; }
+        table { border-collapse: collapse; font-size: 0.8rem; margin-bottom: 1rem; }
+        th, td { border: 1px solid #ccc; padding: 0.15rem 0.4rem; text-align: left; }
+        #rulesError { color: crimson; }
+    </style>
+</head>
+<body>
+    <h1>be-pdfing</h1>
+    <p>
+        Pick a PDF (try <code>demo/home-school-transcript-example.pdf</code> or
+        <code>demo/sample-transcript.pdf</code>).  Edit the rules to re-apply them to the
+        extracted lines without re-reading the file.
+    </p>
+    <input id="picker" type="file" accept=".pdf" be-pdfing>
+    <div class="panes">
+        <section>
+            <h2>Rules</h2>
+            <select id="preset">
+                <option value="home">Home-school transcript</option>
+                <option value="sample">Sample transcript</option>
+                <option value="none">None (lines only)</option>
+            </select>
+            <textarea id="rulesText" spellcheck="false"></textarea>
+            <div id="rulesError"></div>
+            <h2>Records</h2>
+            <div id="records"></div>
+        </section>
+        <section>
+            <h2>Lines <small>(cells separated by tabs)</small></h2>
+            <pre id="lines"></pre>
+        </section>
+    </div>
+    <script type=module>
+        const presets = {
+            home: [
+                {pattern: String.raw`Student:\t(?<student>[^\t]+)`, sets: 'document'},
+                {pattern: String.raw`Grade (?<gradeLevel>\d+)\tGr\tCr`, sets: true},
+                {pattern: String.raw`(?<course>[^\t]+)\t(?<grade>[A-F][+-]?|P)\t(?<credits>\d+(?:\.\d+)?)`, emits: 'courses'},
+            ],
+            sample: [
+                {pattern: String.raw`MO/YR: (?<moYr>\d\d/\d{4})\t(?:GRD )?LEV: (?<gradeLevel>\d+)`, sets: true},
+                {pattern: String.raw`(?<stateCode>\d{5})\t(?<courseCode>[^\t]+)\t(?<description>[^\t]+)\t(?<grade>[A-F][+-]?|P|W|I)\t(?<credEarn>\d+\.\d+)\t(?<credAttp>\d+\.\d+)(?:\t(?<dsg>[A-Z]{1,4})\b)?`, emits: 'courses'},
+                {pattern: String.raw`Cumulative\t(?<credEarn>[\d.]+)\t(?<credAttp>[\d.]+)\t(?<gpaPts>[\d.]+)\t(?<gpa>[\d.]+)`, emits: 'totals'},
+            ],
+            none: [],
+        };
+
+        function applyRulesText(){
+            try{
+                const rules = JSON.parse(rulesText.value);
+                rules.forEach(r => new RegExp(r.pattern, r.flags));
+                rulesError.textContent = '';
+                picker.enh.bePdfing.rules = rules;
+            }catch(e){
+                rulesError.textContent = e.message;
+            }
+        }
+        function loadPreset(){
+            rulesText.value = JSON.stringify(presets[preset.value], null, 2);
+            applyRulesText();
+        }
+        preset.addEventListener('change', loadPreset);
+        rulesText.addEventListener('input', applyRulesText);
+
+        picker.addEventListener('load', e => {
+            if(e.enh !== 'bePdfing') return;
+            const [result] = e.results;
+            if(result === undefined) return;
+            lines.textContent = result.lines.map(l => `p${l.page} ${String(l.y).padStart(5)}  ${l.text}`).join('\n');
+            records.replaceChildren();
+            for(const [name, rows] of Object.entries(result.records ?? {})){
+                const caption = document.createElement('h3');
+                caption.textContent = `${name} (${rows.length})`;
+                const table = document.createElement('table');
+                const keys = [...new Set(rows.flatMap(Object.keys))];
+                const head = table.createTHead().insertRow();
+                for(const key of keys){
+                    const th = document.createElement('th');
+                    th.textContent = key;
+                    head.append(th);
+                }
+                const body = table.createTBody();
+                for(const row of rows){
+                    const tr = body.insertRow();
+                    for(const key of keys) tr.insertCell().textContent = row[key] ?? '';
+                }
+                records.append(caption, table);
+            }
+        });
+        picker.addEventListener('error', e => { lines.textContent = `Error reading ${e.file.name}: ${e.error}`; });
+
+        // The enhancement attaches asynchronously; wait for it before setting rules.
+        (function whenReady(){
+            if(picker.enh?.bePdfing?.resolved) return loadPreset();
+            requestAnimationFrame(whenReady);
+        })();
+    </script>
+</body>
+</html>
