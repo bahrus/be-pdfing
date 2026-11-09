@@ -214,3 +214,130 @@ Events are `load` (`event.results`, `event.enh`), `progress` (one per page), and
 - **Multi-line cells** aren't joined. `sample-transcript.pdf`'s stacked column headers ("State / CRS / Code") come out as three lines. That doesn't matter for data rows.
 - **Scanned PDFs** produce no lines. That's the later OCR or AI-image tier.
 
+## Bruce's Response - event handler?
+
+Thanks for doing step 1.  Honestly, it went a little further than I was expecting, probably due to me not picking up on some subtleties of the summary.  In particular, I'm still thinking about the regex usefulness and wasn't expecting that to already be (partially) baked in.  Let's keep it for now.
+
+I'm thinking that the first integration we should support is an event handler that can have custom logic, and maybe provide help utilities that the handler could use to make it easier?  What do you think?  If this seems like a reasonable approach, please sketch what that would look like below.
+
+## Claude's Sketch: Event Handler + Helpers
+
+Yes, I think this is the right primary integration, and it fits your hesitation about regex. **A handler with plain JavaScript and good helpers covers everything rules can do, and much more.** Real tables need logic that patterns express badly: "stop at the GPA row", "skip repeated headers", "convert the numbers". So I'd make the handler the main path, and treat rules as just *one* helper (plus a no-JS shortcut in the attribute). No code yet; this is the sketch.
+
+### 1. The contract: the handler receives lines and produces records
+
+Very little changes in the pipeline. Today `load` is already dispatched *before* `writeTo` runs, so the handler only needs a way to hand records back:
+
+```
+file selected → extract lines → [rules, if any] → load event / handler → writeTo
+                                                        ↑
+                               reads event.lines, sets event.records
+```
+
+What the handler receives (one call per file):
+
+| Member | Meaning |
+|--------|---------|
+| `event.file` | The `File` |
+| `event.lines` | The extracted lines (as today) |
+| `event.records` | Pre-filled with the rules' output if there are rules; otherwise `undefined`. **The handler sets or modifies it.** |
+| `event.helpers` | The helper functions (section 3). They're on the event so that inline handlers, which can't `import`, can use them. |
+| `event.waitUntil(promise)` | For async logic (e.g. a lookup). `writeTo` waits for it. |
+| `event.enh` | `'bePdfing'` (as today) |
+
+Whatever ends up in `event.records` is what's written to `writeTo` and set on `results`.
+
+### 2. Two ways to attach it
+
+**a) Inline attribute (server-rendered / no build).** For an inline `on*` attribute to work, the event has to have a standard name. `load` is one, and it's what be-literate already uses:
+
+```html
+<input type=file accept=".pdf" be-pdfing='{"writeTo": "indexedDB://pdfs/records/{file.name}"}' onload="
+    if(event.enh !== 'bePdfing') return;
+    const {lines, helpers: {tables, num}} = event;
+    event.records = tables(lines, {header: /Grade (?<gradeLevel>\d+)\tGr\tCr/, until: /^GPA/})
+        .flatMap(t => t.rows.map(r => ({gradeLevel: t.header.gradeLevel, course: r[0], grade: r.Gr, credits: num(r.Cr)})));
+">
+```
+
+The CSP caveat from be-literate's README applies to inline handlers. The alternative is `addEventListener('load', ...)` from a script, with the same contract.
+
+**b) Programmatic: a `handler` property** (following be-calculating's lead, as the addendum notes). This is the more ergonomic route for frameworks:
+
+```JS
+myInput.enh.set.bePdfing.handler = ({file, lines, records, helpers}) => {
+    // return the records (or a Promise of them)
+    return {courses: [...]};
+};
+```
+
+A return value is cleaner than mutating the event. The handler is called before the `load` event is dispatched, so `load` listeners see the final records.
+
+### 3. The helpers (`be-pdfing/helpers.js`)
+
+These are pure functions over `lines`, also importable on their own. Here's a first cut, ordered by how much I think each one earns its place:
+
+| Helper | What it does | Why |
+|--------|--------------|-----|
+| `tables(lines, {header, until?, columns?})` | Finds every line matching `header` (a regex or an array of header texts), then collects the lines below it. **Each cell is assigned to a column by its x-position under the header cells.** Collection stops at `until` or when a line has no cells under the header. Returns `[{header: {...named groups}, columns: [...], rows: [{0: 'Honors Eng 9…', Gr: 'A', Cr: '1'}, ...]}]`. | This is the core of "tables of information". It uses x-alignment rather than cell order, so it isn't thrown off by **empty cells** (like PE's missing DSG), and it handles **side-by-side tables** because each header only claims rows under its own x-range. |
+| `columnsOf(lines, {gutter?})` | Splits lines into column streams, i.e. left-column lines, then right-column lines. It detects a gutter or takes an explicit x. | Fixes the interleaving limitation. You can process each column top to bottom with ordinary loops. |
+| `valueAfter(lines, label)` | The text of the cell right after a label cell: `valueAfter(lines, 'Student:')` → `'Albert Smith'`. It can also look *below* the label (`{below: true}`), for forms laid out as label over value. | Form-like header blocks (name, dates, IDs) appear on almost every document. |
+| `between(lines, start, end?)` / `after(...)` | Slices lines between two patterns. | Narrows the search ("only the ACADEMIC RECORD section"). |
+| `matches(lines, pattern)` | Yields `{line, match, x0, x1}` for every match. This is the internal engine of `applyRules`, exposed. | A building block when you need regex but your own control flow. |
+| `applyRules(lines, rules)` | Exactly today's rules engine. | The regex approach becomes optional, one helper among several. |
+| `num(s)`, `date(s)` | Lenient conversions (`'0.50'` → `0.5`, `'01/2018'` → ISO, `''` → `undefined`). | Values are strings today. |
+
+### 4. The two samples, written as handlers
+
+**Home-school**, where the side-by-side tables are handled by `tables`:
+
+```JS
+handler: ({lines, helpers: {tables, valueAfter, num}}) => ({
+    student: valueAfter(lines, 'Student:'),
+    courses: tables(lines, {header: /Grade (?<gradeLevel>\d+)\tGr\tCr/, until: /^GPA/})
+        .flatMap(({header, rows}) => rows.map(r => ({
+            gradeLevel: num(header.gradeLevel), course: r[0], grade: r.Gr, credits: num(r.Cr),
+        }))),
+})
+```
+
+**Sample transcript**, where the column stream plus a plain loop handles stateful logic:
+
+```JS
+handler: ({lines, helpers: {columnsOf, between, num}}) => {
+    const courses = [];
+    for(const column of columnsOf(between(lines, /ACADEMIC RECORD/, /SAMPLE TRANSCRIPT/))){
+        let term;
+        for(const {text, cells} of column){
+            const heading = /MO\/YR: (\S+)\t(?:GRD )?LEV: (\d+)/.exec(text);
+            if(heading){ term = {moYr: heading[1], gradeLevel: heading[2]}; continue; }
+            if(/Report Period/.test(text)){ term = undefined; continue; }   // context *can* end here
+            const [stateCode, courseCode, description, grade, earn, attp, dsg] = cells.map(c => c.text);
+            if(term && /^\d{5}$/.test(stateCode)){
+                courses.push({...term, stateCode, courseCode, description, grade,
+                    credEarn: num(earn), credAttp: num(attp), dsg});
+            }
+        }
+    }
+    return {courses};
+}
+```
+
+Both of the "known limitations" from v1 go away here without any new rule features. Interleaving is fixed by `columnsOf`. Context that "never ends" is fixed by `term = undefined`, because it's just code.
+
+### 5. What I'd change from v1
+
+- Keep `rules` as an attribute-level, no-JS shortcut, and *also* export it as a helper. If you'd rather de-emphasize it, I'd move it lower in the README, after the handler section.
+- Add the `handler` property, plus `event.records`, `event.helpers` and `event.waitUntil` on the `load` event.
+- Add `helpers.js`. I'd build `tables`, `columnsOf` and `valueAfter` first, since they carry the most weight, test them against both samples, and leave `date` until there's a need.
+- Should `load` be dispatched once per file instead of once with `results[]`? With per-file handler semantics, one event per file is simpler (`event.file`, `event.lines`, `event.records`). The cost is a breaking change to v1's `event.results`, but v1 has no users yet.
+
+### Questions
+
+1. Is `load`, with a settable `event.records`, OK as the event name? It's needed for inline `onload` handlers. Or would you rather have a custom name like `pdfing`, and only support `addEventListener` and the `handler` property?
+2. Should I switch to **one event per file**, as described above?
+3. Should `rules` stay as a top-level property, or become a helper only?
+4. Does this helper list match what you had in mind, or were you picturing something different, e.g. helpers aimed at a particular output shape?
+
+
+
