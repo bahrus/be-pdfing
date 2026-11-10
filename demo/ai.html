@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>be-pdfing built-in AI demo</title>
+    <!-- #include virtual="/imports.html" -->
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 1rem; }
+        .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        textarea { width: 100%; height: 10rem; font-family: monospace; font-size: 0.8rem; }
+        table { border-collapse: collapse; font-size: 0.8rem; margin-bottom: 1rem; }
+        th, td { border: 1px solid #ccc; padding: 0.15rem 0.4rem; text-align: left; }
+        .bad { background: #fde2e2; }
+        #aiStatus { font-weight: 600; }
+        #error { color: crimson; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>be-pdfing + the browser's built-in AI</h1>
+    <p>
+        A handler that sends the extracted text to the browser's built-in language model
+        (Chrome's Prompt API, Gemini Nano), with a JSON schema for the response, compared
+        with the layout-helper handler (<a href="./">main demo</a>).
+        Try <code>demo/home-school-transcript-example.pdf</code> or <code>demo/sample-transcript.pdf</code>.
+    </p>
+    <p>
+        Built-in AI: <span id="aiStatus">checking...</span>
+        <button id="enable" hidden>Enable built-in AI (downloads the model)</button>
+        <progress id="progress" max="1" hidden></progress>
+    </p>
+    <input id="picker" type="file" accept=".pdf">
+    <span id="timing"></span>
+    <div id="error"></div>
+    <details>
+        <summary>Instructions (system prompt) and schema</summary>
+        <textarea id="instructionsText" spellcheck="false"></textarea>
+        <pre id="schemaText"></pre>
+    </details>
+    <h2 id="summary"></h2>
+    <div class="panes">
+        <section>
+            <h2>Built-in AI</h2>
+            <div id="aiRecords"></div>
+        </section>
+        <section>
+            <h2>Layout helpers</h2>
+            <div id="expectedRecords"></div>
+        </section>
+    </div>
+    <script type=module>
+        import {defBePdfing} from 'be-pdfing/def.js';
+        import {aiAvailability, createSession} from 'be-pdfing/ai.js';
+        import {deterministicHandler, transcriptSchema, transcriptInstructions, compareCourses} from './transcriptHandlers.js';
+
+        instructionsText.value = transcriptInstructions;
+        schemaText.textContent = JSON.stringify(transcriptSchema, null, 2);
+
+        async function showAvailability(){
+            const availability = await aiAvailability();
+            aiStatus.textContent = availability === 'unavailable'
+                ? 'unavailable (needs a browser with the Prompt API, e.g. a recent Chrome on a capable device)'
+                : availability;
+            enable.hidden = !(availability === 'downloadable' || availability === 'downloading');
+        }
+        enable.addEventListener('click', async () => {
+            progress.hidden = false;
+            try{
+                const session = await createSession({onDownloadProgress: f => progress.value = f});
+                session.destroy();
+            }catch(e){
+                error.textContent = String(e);
+            }
+            progress.hidden = true;
+            await showAvailability();
+        });
+        await showAvailability();
+
+        await defBePdfing(document.body);
+        let expected, started;
+        picker.addEventListener('change', () => {
+            started = performance.now();
+            error.textContent = '';
+            summary.textContent = '';
+            aiRecords.replaceChildren();
+            expectedRecords.replaceChildren();
+            timing.textContent = 'reading...';
+        });
+        picker.enh.set.bePdfing.handler = async ({lines, helpers}) => {
+            expected = deterministicHandler({lines, helpers});
+            timing.textContent = 'asking the model...';
+            return await helpers.promptForRecords(helpers.columnsOf(lines), {
+                schema: transcriptSchema,
+                instructions: instructionsText.value,
+            });
+        };
+        picker.addEventListener('error', e => {
+            error.textContent = `${e.file.name}: ${e.error?.name}: ${e.error?.message}`;
+        });
+        picker.addEventListener('load', e => {
+            const [{records}] = e.results;
+            timing.textContent = `${((performance.now() - started) / 1000).toFixed(1)}s`;
+            render(expectedRecords, expected);
+            if(records === undefined) return;
+            const c = compareCourses(expected, records);
+            summary.textContent = `Student: ${records.student === expected.student ? 'match' : `"${records.student}" vs "${expected.student}"`}.  `
+                + `Courses: ${c.exact} of ${c.expected} exact, ${c.mismatched.length} with a different grade/credits, `
+                + `${c.missing.length} missing, ${c.extra.length} extra.`;
+            render(aiRecords, records, new Set([...c.extra, ...c.mismatched.map(m => m.actual)]));
+        });
+
+        function render(container, records, flagged = new Set()){
+            container.replaceChildren();
+            const h = document.createElement('h3');
+            h.textContent = `student: ${records.student}`;
+            const table = document.createElement('table');
+            const keys = ['gradeLevel', 'term', 'courseCode', 'course', 'grade', 'credits'];
+            const head = table.createTHead().insertRow();
+            for(const key of keys) head.insertCell().textContent = key;
+            const body = table.createTBody();
+            for(const course of records.courses ?? []){
+                const tr = body.insertRow();
+                if(flagged.has(course)) tr.className = 'bad';
+                for(const key of keys) tr.insertCell().textContent = course[key] ?? '';
+            }
+            container.append(h, table);
+        }
+    </script>
+</body>
+</html>

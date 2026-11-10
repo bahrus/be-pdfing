@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIHandler</title>
+    <!-- #include virtual="/imports.html" -->
+</head>
+<body>
+    <!-- A handler that asks the browser's built-in model for the records. -->
+    <input id="subject" type="file" accept=".pdf">
+    <!-- Downloading the model requires a user gesture. -->
+    <button id="enable">Enable built-in AI</button>
+    <div id="target"></div>
+    <script type=module>
+        import {defBePdfing} from '/def.js';
+        import {createSession} from '/ai.js';
+        enable.addEventListener('click', async () => {
+            try{
+                const session = await createSession({onDownloadProgress: f => target.setAttribute('download', String(f))});
+                session.destroy();
+                target.setAttribute('enabled', '');
+            }catch(e){
+                target.setAttribute('enable-error', String(e));
+            }
+        });
+        import {aiHandler, deterministicHandler, transcriptSchema, transcriptInstructions, compareCourses} from '/demo/transcriptHandlers.js';
+        Object.assign(window, {transcriptSchema, transcriptInstructions});
+        await defBePdfing(document.body);
+        subject.enh.set.bePdfing.handler = async (args) => {
+            // Also compute the deterministic records, to score the model's against.
+            window.expected = deterministicHandler(args);
+            return await aiHandler(args);
+        };
+        subject.enh.bePdfing.writeTo = 'sessionStorage://AIHandler-{file.name}';
+        window.loads = [];
+        window.errors = [];
+        subject.addEventListener('load', e => {
+            const {records} = e.results[0];
+            window.loads.push(records);
+            window.comparison = records === undefined ? undefined : compareCourses(window.expected, records);
+            target.setAttribute('loads', String(window.loads.length));
+        });
+        subject.addEventListener('error', e => {
+            window.errors.push({name: e.error?.name, message: e.error?.message});
+        });
+        function whenResolved(){
+            if(subject.enh.bePdfing?.resolved === true){
+                target.setAttribute('ready', '');
+                return;
+            }
+            requestAnimationFrame(whenResolved);
+        }
+        whenResolved();
+    </script>
+</body>
+</html>

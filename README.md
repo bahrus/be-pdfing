@@ -164,6 +164,42 @@ handler: ({lines, helpers: {tables, num}}) => {
 }
 ```
 
+### Using the browser's built-in AI in a handler
+
+Instead of layout logic, a handler can hand the text to the browser's built-in language model ([Chrome's Prompt API](https://developer.chrome.com/docs/ai/prompt-api), Gemini Nano), with a JSON Schema the response must match. pdf.js still does the reading. The model only sees text, and nothing leaves the device:
+
+```JS
+myFileInput.enh.set.bePdfing.handler = async ({lines, helpers: {promptForRecords, columnsOf}}) =>
+    await promptForRecords(columnsOf(lines), {
+        instructions: 'You extract data from high school transcripts. ...',   // the system prompt
+        schema: {                                                              // the responseConstraint
+            type: 'object',
+            properties: {
+                student: {type: 'string'},
+                courses: {type: 'array', items: {type: 'object', properties: {
+                    gradeLevel: {type: 'integer'}, course: {type: 'string'},
+                    grade: {type: 'string'}, credits: {type: 'number'},
+                }}},
+            },
+        },
+    });
+```
+
+The AI helpers (in `be-pdfing/ai.js`, and also on `helpers`):
+
+| Helper | What it does |
+|--------|--------------|
+| `promptForRecords(input, {schema, instructions?, signal?, allowDownload?})` | Creates a session, prompts it with `input` (text, lines, or columns of lines), parses the JSON response, and destroys the session. |
+| `linesToText(lines)` | Lines as prompt text: one row per line, cells separated by `" \| "`. Given columns (from `columnsOf`), each column is labeled and given separately, so side-by-side tables aren't interleaved. |
+| `aiAvailability()` | `'available'`, `'downloadable'`, `'downloading'` or `'unavailable'`. |
+| `createSession({onDownloadProgress?, ...})` | Creates a session, downloading the model first if needed. Call it from a click handler to download the model. |
+
+Things to know:
+
+- **The model download is several GB, and needs a user gesture.** `promptForRecords` deliberately won't start it, since picking a file would otherwise be enough to trigger it. It throws an `AIUnavailableError`, which the input reports as an `error` event. Offer a button that calls `createSession()` (see the [AI demo](demo/ai.html)), or pass `allowDownload: true`.
+- If the model is `'unavailable'` (an unsupported browser or device), `promptForRecords` throws an `AIUnavailableError` too. So does a response that isn't valid JSON.
+- The model's output varies from run to run, and a small on-device model can miss or invent rows. [demo/ai.html](demo/ai.html) shows its records next to the layout-helper handler's, and scores them against each other.
+
 ## Example 3: rules turn lines into records, without JavaScript
 
 For simpler documents, regular-expression rules in the attribute do the job with no script at all:
@@ -309,6 +345,7 @@ const records = applyRules(lines, rules);
 7. > npm run build
 8. > npm run serve
 9. Open http://localhost:8000/demo/ in a modern browser (Chrome/Edge 146+ -- JSON module imports with type assertion are required)
+   The built-in AI version is at http://localhost:8000/demo/ai.html.
 
 `npm run serve` first copies pdf.js's two modules into `vendor/` as `.js` files, because the dev server (spa-ssi) treats `.mjs` requests as server-side includes rather than serving them as JavaScript. `imports.html` maps the pdf.js specifiers there.
 
@@ -317,3 +354,5 @@ const records = applyRules(lines, rules);
 ```
 > npm run test
 ```
+
+The built-in-AI tests (`AIHandler.spec.mjs`) use a fake `LanguageModel`, so they're deterministic and need no download. To run the handler against the **real** model, scored against the layout-helper handler, run `AIHandlerReal.spec.mjs` with `BE_PDFING_REAL_AI=1`. The first run downloads the model (several GB) into a persistent profile under `.ai-profile/`. The file's header comment lists the options (browser channel, profile, extra flags).

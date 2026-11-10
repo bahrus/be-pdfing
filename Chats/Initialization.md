@@ -429,3 +429,43 @@ In pdf.js 6, `destroy()` exists on the *loading task* only, not on the document 
 2. Fix spa-ssi's `.mjs` handling, so the `vendor/` copy step can go.
 3. Try `tables` on a non-transcript document (an invoice or a bank statement), to check that the "tables of information" focus generalizes.
 
+## Bruce's Response - Gemini within event handler
+
+Can you provide alternative demos / tests with the same transcript files, but which use the AI built into the browser?  The intention is to also provide declarative support, but let's start with programmatic in the event handler.
+
+
+
+## Claude's Implementation Notes: built-in AI in the handler
+
+Done. 20 tests pass, and 2 real-model tests are skipped by default (see below). Nothing is committed. The types submodule's `be-pdfing/types.d.ts` has more changes to commit.
+
+### What's there
+
+| File | What |
+|------|------|
+| `ai.js` (new, also exported as `be-pdfing/ai.js` and re-exported on `helpers`) | `promptForRecords(input, {schema, instructions, signal, allowDownload})`, `linesToText`, `aiAvailability`, `createSession`, `AIUnavailableError`. A thin layer over `LanguageModel`: availability → `create({initialPrompts: [system]})` → `prompt(text, {responseConstraint: schema})` → `JSON.parse` → `destroy()`. |
+| `demo/transcriptHandlers.js` (new) | Shared by the demo and the tests. One **generic** `transcriptSchema` and `transcriptInstructions` for both sample PDFs, so there's no per-document code on the AI side. Also `aiHandler`, a `deterministicHandler` (the layout-helper handlers from before, normalized to the same shape) and `compareCourses` (matches by course name + grade level, then checks grade/credits). |
+| `demo/ai.html` (new, linked from the main demo) | Shows availability, an "Enable built-in AI" button with download progress, and editable instructions. Its handler runs both handlers and shows the model's records next to the layout helpers', with mismatches highlighted and a score ("N of 31 exact, ..."). |
+| `tests/AIHandler.*` + `tests/fakeLanguageModel.js` | 4 tests against a **fake** `LanguageModel`, injected with `addInitScript`. They check exactly what the model is asked (system prompt, column-by-column text, the schema as `responseConstraint`), that its JSON becomes the records and is written by `writeTo`, that the session is destroyed, and the error paths (unavailable, not JSON, not downloaded). |
+| `tests/AIHandlerReal.spec.mjs` | The real model, run with `BE_PDFING_REAL_AI=1`. It scores the model against the deterministic handler with loose thresholds (≥ 80% of courses found, ≤ 20% extra) and logs the scores and timing. |
+
+### Design choices worth a look
+
+- **The text the model gets** is `columnsOf(lines)` run through `linesToText`: each column under a `=== Column N of M ===` heading, cells separated by `" | "`. Interleaved side-by-side rows seem like exactly the thing a small model would get wrong, and splitting by column costs nothing.
+- **Downloads are opt-in.** Playwright's bundled Chromium (v158) *does* have `LanguageModel`, and on this machine reports `'downloadable'`. I first gated the download on `navigator.userActivation`, but picking a file leaves an activation in effect (in Playwright, and in real use too, because extraction is fast). So **selecting a PDF could silently start a multi-GB download**. Instead, `promptForRecords` throws `AIUnavailableError` unless the model is already `'available'` or you pass `allowDownload: true`. `createSession()`, meant for a button, does download.
+- Errors (unavailable, not ready, invalid JSON) come out of the handler, so they surface as the existing `error` event. With no records, `writeTo` falls back to the lines, as before.
+
+### What I could *not* verify
+
+**I haven't run the real model.** Doing so means a several-GB download, which seemed like your call, not mine. Edge 156 is installed but doesn't expose the Prompt API without a flag. Chrome isn't installed. Playwright's Chromium reports `'downloadable'`. To try it:
+
+- **Demo:** `npm run serve`, open `http://localhost:8000/demo/ai.html`, click "Enable built-in AI" (once), then pick a transcript.
+- **Test:** `BE_PDFING_REAL_AI=1 npx playwright test tests/AIHandlerReal.spec.mjs`. It uses Playwright's Chromium by default (`BE_PDFING_AI_CHANNEL=chrome` or `msedge` to switch), with a persistent profile under `.ai-profile/` (gitignored), so the download happens once. The 80% / 20% thresholds are guesses until we see real numbers.
+
+How well Gemini Nano does on 30+ rows is the open question. The output is ~2k tokens of JSON, and small models tend to drop or merge rows in long lists. If it struggles, a **hybrid** is the obvious next step: let `tables` find the rows deterministically, and use the model only for the parts that are hard to express in code (which heading a row belongs to, normalizing names, odd layouts), one table at a time.
+
+### Toward declarative support
+
+What this suggests for the attribute: `{"ai": {"instructions": "...", "schema": {...}}}`. The enhancement would call `promptForRecords(columnsOf(lines), ...)` itself, plus a declarative way to offer the download button. That's a sketch for whenever you want to go there.
+
+Sources consulted for the current API shape: [Chrome Prompt API docs](https://developer.chrome.com/docs/ai/prompt-api), [MDN LanguageModel.prompt()](https://developer.mozilla.org/en-US/docs/Web/API/LanguageModel/prompt), [Structured output for the Prompt API](https://developer.chrome.com/docs/ai/structured-output-for-prompt-api).

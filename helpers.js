@@ -3,6 +3,7 @@
 import { applyRules, cellStarts, xAt } from './applyRules.js';
 
 export { applyRules };
+export { linesToText, aiAvailability, promptForRecords, createSession, AIUnavailableError } from './ai.js';
 
 /**
  * Every match of `pattern` in every line's `text`, with the horizontal extent of the match.
