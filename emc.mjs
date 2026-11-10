@@ -31,9 +31,9 @@ export const emc = {
                 ifKeyIn: ['initialized'],
                 ifAllOf: ['enhancedElement', 'initialized']
             },
-            // Re-runs when the rules change, without re-reading the file.
+            // Re-runs when the rules or handler change, without re-reading the file.
             structure: {
-                ifKeyIn: ['extracted', 'rules'],
+                ifKeyIn: ['extracted', 'rules', 'handler'],
                 ifAllOf: ['extracted']
             },
             storeResults: {

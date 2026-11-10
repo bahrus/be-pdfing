@@ -20,6 +20,7 @@
     "./be-pdfing.js": "./be-pdfing.js",
     "./extractLines.js": "./extractLines.js",
     "./applyRules.js": "./applyRules.js",
+    "./helpers.js": "./helpers.js",
     "./def.js": "./def.js",
     "./emc.json": "./emc.json"
   },

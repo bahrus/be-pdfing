@@ -30,7 +30,8 @@
             "structure": {
                 "ifKeyIn": [
                     "extracted",
-                    "rules"
+                    "rules",
+                    "handler"
                 ],
                 "ifAllOf": [
                     "extracted"

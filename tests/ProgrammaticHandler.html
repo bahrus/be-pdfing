@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProgrammaticHandler</title>
+    <!-- #include virtual="/imports.html" -->
+</head>
+<body>
+    <!-- A `handler` (custom logic + helpers) instead of rules. -->
+    <input id="subject" type="file" accept=".pdf">
+    <div id="target"></div>
+    <script type=module>
+        import {defBePdfing} from '/def.js';
+        await defBePdfing(document.body);
+        window.handlerCalls = [];
+        subject.enh.set.bePdfing.handler = ({file, numPages, lines, records, helpers: {tables, valueAfter, num}}) => {
+            window.handlerCalls.push({name: file.name, numPages, lineCount: lines.length, records});
+            return {
+                student: valueAfter(lines, 'Student:'),
+                courses: tables(lines, {
+                    header: /Grade (?<gradeLevel>\d+)\tGr\tCr/,
+                    until: /^GPA/,
+                    columns: ['course', 'grade', 'credits'],
+                }).flatMap(({header, rows}) => rows.map(row => ({
+                    gradeLevel: num(header.gradeLevel), ...row, credits: num(row.credits),
+                }))),
+            };
+        };
+        subject.enh.bePdfing.writeTo = 'sessionStorage://ProgrammaticHandler-{file.name}';
+        window.loads = [];
+        window.errors = [];
+        subject.addEventListener('load', e => {
+            window.loads.push({enh: e.enh, records: e.results[0].records});
+            target.setAttribute('loads', String(window.loads.length));
+        });
+        subject.addEventListener('error', e => {
+            window.errors.push(String(e.error));
+            target.setAttribute('errors', String(window.errors.length));
+        });
+        // A new handler re-structures the already-extracted lines; an async one is awaited.
+        window.switchHandler = () => {
+            subject.enh.bePdfing.handler = async ({lines, helpers: {valueAfter}}) => {
+                await new Promise(resolve => setTimeout(resolve, 50));
+                return {evaluator: valueAfter(lines, 'Evaluator:')};
+            };
+        };
+        window.throwingHandler = () => {
+            subject.enh.bePdfing.handler = () => { throw new Error('oops'); };
+        };
+        function whenResolved(){
+            if(subject.enh.bePdfing?.resolved === true){
+                target.setAttribute('ready', '');
+                return;
+            }
+            requestAnimationFrame(whenResolved);
+        }
+        whenResolved();
+    </script>
+</body>
+</html>

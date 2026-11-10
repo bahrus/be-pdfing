@@ -114,7 +114,7 @@ function inherited(context, x0, x1){
  * Offset of each cell within `line.text`.
  * @param {Line} line
  */
-function cellStarts(line){
+export function cellStarts(line){
     const starts = [];
     let offset = 0;
     for(const cell of line.cells){
@@ -131,7 +131,7 @@ function cellStarts(line){
  * @param {number} offset
  * @param {boolean} isEnd true for an exclusive end offset
  */
-function xAt(line, starts, offset, isEnd){
+export function xAt(line, starts, offset, isEnd){
     const {cells} = line;
     for(let i = 0; i < cells.length; i++){
         const cell = cells[i];

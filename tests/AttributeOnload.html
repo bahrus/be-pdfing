@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AttributeOnload</title>
+    <!-- #include virtual="/imports.html" -->
+    <be-hive>
+        <script type=emc src="be-pdfing/emc.json"></script>
+    </be-hive>
+    <script type=module>
+        import 'be-hive/be-hive.js';
+    </script>
+</head>
+<body>
+    <!-- An inline onload handler sets each result's records, using event.helpers, and
+         delays writeTo with event.waitUntil. -->
+    <input id="subject" type="file" accept=".pdf" multiple
+        be-pdfing='{"writeTo": "sessionStorage://AttributeOnload-{file.name}"}'
+        onload="
+            if(event.enh !== 'bePdfing') return;
+            const {valueAfter, tables} = event.helpers;
+            for(const result of event.results){
+                result.records = {
+                    student: valueAfter(result.lines, 'Student:') ?? valueAfter(result.lines, 'LEGAL NAME (Last, First, Middle)', {below: true}),
+                    tableCount: tables(result.lines, {header: /Grade \d+\tGr\tCr|Code\tCODE\tDescription/}).length,
+                };
+            }
+            event.waitUntil(new Promise(resolve => setTimeout(() => {
+                for(const result of event.results) result.records.checked = true;
+                resolve();
+            }, 50)));
+            window.loadCount = (window.loadCount ?? 0) + 1;
+        ">
+    <div id="target"></div>
+    <script type=module>
+        const keys = ['home-school-transcript-example.pdf', 'sample-transcript.pdf'].map(n => `AttributeOnload-${n}`);
+        window.addEventListener('message', e => {
+            if(!Array.isArray(e.data)) return;
+            // Each write is broadcast separately; mark when both are in.
+            if(keys.every(key => sessionStorage.getItem(key) !== null)){
+                window.stored = keys.map(key => JSON.parse(sessionStorage.getItem(key)));
+                target.setAttribute('mark', 'good');
+            }
+        });
+        function whenResolved(){
+            if(subject.enh?.bePdfing?.resolved === true){
+                target.setAttribute('ready', '');
+                return;
+            }
+            requestAnimationFrame(whenResolved);
+        }
+        whenResolved();
+    </script>
+</body>
+</html>

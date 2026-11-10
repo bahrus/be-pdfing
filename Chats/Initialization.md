@@ -339,5 +339,93 @@ Both of the "known limitations" from v1 go away here without any new rule featur
 3. Should `rules` stay as a top-level property, or become a helper only?
 4. Does this helper list match what you had in mind, or were you picturing something different, e.g. helpers aimed at a particular output shape?
 
+## Bruce's Response 
 
+I like to follow the same 'load' as the event name.
+
+As far as one event per file, that's a tough one.  What does be-literate do?  I think they should probably be consistent (even if it breaks backwards compatibility, which shouldn't block us at all), but it's possible that be-literate made the wrong decision.  What do you think the typical developer / ai agent would expect / want?
+
+Let's hold on to rules for now as a top level property.
+
+The helper functions you propose sound reasonable to me.
+
+
+
+## Claude's Response: one event per file?
+
+**What be-literate does:** it fires **one** `load` event after *all* the selected files have been read, carrying an array (`event.fileContents`, one entry per file). It also sets that array on the instance (`fileContents`) and writes to `writeTo` once per file. be-pdfing v1 already mirrors this with `event.results`.
+
+**My recommendation: keep one `load` event per selection, consistent with be-literate.** I think be-literate made the right call, for these reasons:
+
+1. **It mirrors the platform.** The native `change` event fires once per selection, and `input.files` is a list. A developer (or an agent) who knows `<input type=file>` already thinks in terms of "the selection", so "`load` fires when the selection has been processed" is the least surprising rule.
+2. **"Everything is done" is what listeners usually want.** Rendering a summary, enabling a submit button, or comparing two transcripts all need every file. With per-file events, each listener would have to count files itself.
+3. **The single-file case stays a one-liner.** Most file inputs don't have `multiple`, and `const [result] = event.results` (or `event.results[0]`) is a familiar pattern.
+4. **Consistency across the family is worth more than a marginal ergonomic win.** An agent that has seen one be-* file enhancement should be able to guess how the next one behaves.
+
+**The handler, though, is naturally per file.** Custom logic is about *one document's* lines, so I'd split the two cleanly:
+
+- **`handler` property:** called **once per file**, as `({file, lines, records, helpers}) => records`, before `load` fires. Its return value becomes that file's `records`.
+- **`load` event:** fires **once**, after all handlers have run. Each entry of `event.results` is `{file, numPages, lines, records}`, and **`records` on each entry is settable**, which gives inline `onload` handlers the same power:
+
+```html
+<input type=file accept=".pdf" be-pdfing onload="
+    if(event.enh !== 'bePdfing') return;
+    const {tables, num} = event.helpers;
+    for(const result of event.results){
+        result.records = tables(result.lines, {header: /Grade (?<gradeLevel>\d+)\tGr\tCr/, until: /^GPA/});
+    }
+">
+```
+
+- `event.helpers` and `event.waitUntil(promise)` are on the event once (not per entry), and `writeTo` waits for any `waitUntil` promises before writing each file's records.
+
+The only change for v1 is additive: `results[i].records` becomes writable from a listener, plus the new `handler`, `helpers` and `waitUntil`. Nothing breaks.
+
+If that works for you, the next step would be: add `helpers.js` (`tables`, `columnsOf`, `valueAfter`, then `between`, `matches`, `num`), the `handler` property, the event members, and Playwright tests that use handlers against both sample PDFs.
+
+## Bruce's Response II
+
+Sounds good, please proceed and add implementation notes below.
+
+## Claude's Implementation Notes: handler + helpers
+
+Done, with all 16 Playwright tests passing (6 from v1 + 10 new). Nothing is committed. **The types submodule now has further changes** in `be-pdfing/types.d.ts` that need committing there.
+
+### What changed
+
+| File | Change |
+|------|--------|
+| `helpers.js` (new) | `tables`, `valueAfter`, `columnsOf`, `between`, `after`, `matches`, `num`, plus `applyRules` re-exported. Pure functions over `lines`; also exported as `be-pdfing/helpers.js`. |
+| `be-pdfing.js` | `structure` now runs rules → `handler` (once per file) → one `load` event. `LoadEvent` gains `helpers` and `waitUntil()`, and listeners may set `results[i].records`. `storeResults` writes `records` whenever any exist (no longer only when there are rules), otherwise `lines`. |
+| `emc.mjs` / `emc.json` | `structure` also re-runs when `handler` changes. |
+| `applyRules.js` | Only exports two internal utilities (`cellStarts`, `xAt`) for `helpers.js` to reuse. Behavior is unchanged. |
+| `types/be-pdfing/types.d.ts` | `Handler`, `HandlerArgs`, `Helpers`, `Table`, `TableOptions`, `Match`, etc. `PdfResult.records` is now `any`, since a handler can return any shape. |
+| `README.md` | New "Example 2: custom logic" (inline `onload`, `handler` property, the helpers, and both samples' handlers). Rules become Example 3 ("without JavaScript") and writeTo Example 4. The property table gains `handler`. |
+| `demo/index.html` | Presets for a handler (live-editable JS body) as well as rules, for both samples. |
+| `tests/` | `Helpers.spec.mjs` (8 unit tests that run in Node with pdf.js's legacy build), `ProgrammaticHandler` and `AttributeOnload` (multiple files, `event.helpers`, `waitUntil`, writeTo). |
+
+### Bug found along the way
+
+In pdf.js 6, `destroy()` exists on the *loading task* only, not on the document proxy. v1's `await pdf.destroy()` in a `finally` block was therefore throwing on every read. The lines had already been pushed, so the tests passed, but every successful read **also dispatched a spurious `error` event**, and the worker was never released. It's fixed (`loadingTask.destroy()`), and `ProgrammaticHandler` now asserts that no error events fire.
+
+### How `tables` works (the decisions worth reviewing)
+
+- **Which table a cell belongs to:** when the header matches several times on one line, the page is split halfway across the gap between neighboring headers, and a cell belongs to the table containing its *center*. A single table claims the whole width.
+- **Which column a cell belongs to:** the header cell it overlaps most or, if it overlaps none, the nearest one. That's what makes the sample's DSG values (which sit just *left* of the "DSG" header text) and its empty cells come out right.
+- **Where a table ends:** at the first line (within its range) matching `until`, the next header overlapping it, a page break, or a vertical gap larger than 1.75× the median line spacing so far. The gap is measured between consecutive lines *of the page*, not just the table's rows. Otherwise a line with text only in the neighboring table looks like a gap; that cut the sample's left table off after its first term until I fixed it.
+- **Without `until`, a table usually runs on** into whatever is below it (GPA rows, summaries), because transcripts keep their line spacing. So the README recommends `until`. A smarter default (e.g. ending when the cells stop lining up with the header) is possible, but I'd wait for a real document that needs it.
+- **Rows that aren't data rows** (the sample's `MO/YR` sub-headings) come through as rows too. `table.lines[i]` gives the line behind `rows[i]` (restricted to the table), so the handler can recognize them with a regex. That's how the sample-transcript handler tracks the term, and ends it, with a plain variable.
+
+### Other notes
+
+- **`columnsOf`'s automatic gutter detection is a heuristic.** It looks for the x crossed by the fewest cells in the middle 40% of the page, ignoring single-cell lines, preferring the middle. It works on both samples, but centered titles land in whichever column holds their center. `{gutter: x}` overrides it. In practice, `tables` with a repeated header turned out to be the better tool for side-by-side tables, so neither sample handler ended up needing `columnsOf`.
+- **`valueAfter`** returns the rest of the label's own cell when there is one (`'Entrance Date:'` → `'Sept. 1, 2014'`). So for a label-over-value layout, pass the label cell's full text (`'LEGAL NAME (Last, First, Middle)'`, `{below: true}`).
+- **A handler that throws** produces an `error` event for that file, and the file's records are left as the rules produced them. Assigning a new `handler` (or `rules`) re-structures the already-extracted lines, as before. If a newer run starts while an older one is still awaiting an async handler or `waitUntil`, the older one's results are dropped.
+- I left out `date()` as planned, until there's a document that needs it.
+
+### Possible next steps
+
+1. An emoji shorthand (📑?), like be-literate's 📖.
+2. Fix spa-ssi's `.mjs` handling, so the `vendor/` copy step can go.
+3. Try `tables` on a non-transcript document (an invoice or a bank statement), to check that the "tables of information" focus generalizes.
 
