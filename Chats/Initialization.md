@@ -469,3 +469,7 @@ How well Gemini Nano does on 30+ rows is the open question. The output is ~2k to
 What this suggests for the attribute: `{"ai": {"instructions": "...", "schema": {...}}}`. The enhancement would call `promptForRecords(columnsOf(lines), ...)` itself, plus a declarative way to offer the download button. That's a sketch for whenever you want to go there.
 
 Sources consulted for the current API shape: [Chrome Prompt API docs](https://developer.chrome.com/docs/ai/prompt-api), [MDN LanguageModel.prompt()](https://developer.mozilla.org/en-US/docs/Web/API/LanguageModel/prompt), [Structured output for the Prompt API](https://developer.chrome.com/docs/ai/structured-output-for-prompt-api).
+
+## Bruce's Response
+
+Wow, I didn't realize that using the browsers AI capabilities still means a several GB download.  That seemingly makes it a totally unacceptable solution (especially as I want this to be useful for cheap smart phones).  Is that a permanent limitation?  Is the expectation that most people will download the GB from one site or another, so that other sites don't have to download the model?  What were the browser vendors thinking when they implemented this?
