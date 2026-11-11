@@ -473,3 +473,50 @@ Sources consulted for the current API shape: [Chrome Prompt API docs](https://de
 ## Bruce's Response
 
 Wow, I didn't realize that using the browsers AI capabilities still means a several GB download.  That seemingly makes it a totally unacceptable solution (especially as I want this to be useful for cheap smart phones).  Is that a permanent limitation?  Is the expectation that most people will download the GB from one site or another, so that other sites don't have to download the model?  What were the browser vendors thinking when they implemented this?
+
+## Claude's Response: the download, phones, and what the vendors were thinking
+
+Short version: **for cheap smartphones, the built-in AI isn't an option today, and won't be for some years.** So I'd keep it as an optional extra on top of the layout helpers, which are the part that works everywhere.
+
+### Is the download per site?
+
+The model is **managed by the browser, not by sites**. Chrome stores one copy (~4 GB, `weights.bin` in an `OptGuideOnDeviceModel` folder) in the browser's data, outside any site's storage. The Chrome docs describe the download as happening "the first time" a site uses one of these APIs. I couldn't find an official statement that the copy is shared across all sites. But it is stored per browser rather than per site, so a second site shouldn't trigger a second download. That was my understanding, but it isn't confirmed.
+
+More to the point, **Chrome now downloads it by itself** on eligible desktops, for its own features. It's been widely reported (and criticized) that Chrome installs the 4 GB model without asking, and puts it back if the user deletes it. Google's answer is that it can be turned off with an "On-device AI" setting, and that the model is deleted automatically when free disk space runs low. So your guess is roughly right, though it isn't "some site" doing the download: on a capable desktop, Chrome itself has often already fetched the model, and then the cost to your site is zero. That's why the demo can show `'available'` straight away on many desktops, and why on Playwright's fresh profile it shows `'downloadable'`.
+
+### Phones
+
+- **The Prompt API isn't available on Android or iOS at all.** Chrome's docs say the Gemini Nano-based APIs (Prompt, Summarizer, Writer, Rewriter) are designed for desktops and laptops and don't work on mobile. The documented requirements are Windows / macOS / Linux / Chromebook Plus, 22 GB free disk, and a GPU with more than 4 GB of VRAM (or 16 GB of RAM with 4 or more cores).
+- The lighter APIs, **Translator and Language Detector, do work on Android**. Chrome has said availability will be decided API by API, and the Prompt API is the most demanding.
+- **Is it permanent?** Probably not forever, but cheap phones will be last. Android does have Gemini Nano (through the OS, for apps), but only on flagship-class phones. Even if Chrome for Android exposes it one day, a budget phone with 3–4 GB of RAM in total can't hold a model of this size alongside everything else. Models are getting smaller and phones better, but I'd plan on "years", and on low-end devices staying excluded longest.
+
+### What were the browser vendors thinking?
+
+The reasoning is coherent, even if the tradeoffs land badly for your use case:
+
+1. **One model per device instead of one per site.** The alternative is each site shipping its own model (WebLLM, transformers.js). Because browsers partition storage by site for privacy, every site would download and cache its own copy, of hundreds of MB to several GB. A browser-managed model is the only way to pay that cost once.
+2. **Privacy and cost.** The data never leaves the device (a real plus for transcripts), there's no per-request server bill, and it works offline.
+3. **A bet on hardware trends.** Ship on the devices that can run it today (desktops), and widen the reach as hardware catches up.
+
+Here's the criticism, which I think is fair:
+
+- **It creates a two-tier web.** Features that depend on the API work on expensive hardware only.
+- **It's hard to make interoperable.** Chrome uses Gemini Nano and Edge uses Phi-4-mini, so the same prompt gives different answers in each browser. That's very unlike most web APIs. As far as I know, Mozilla and WebKit have been skeptical for roughly these reasons, and Safari and Firefox don't ship it.
+- **The silent 4 GB download** has drawn a privacy and consent backlash.
+
+### What I'd do with be-pdfing
+
+- **The core path stays deterministic:** pdf.js, then the layout helpers, then a `handler` or `rules`. That runs on any phone. The only heavy piece is pdf.js (about 1–2 MB, loaded only once a file is picked).
+- **Keep the AI as progressive enhancement**, for when `aiAvailability()` says `'available'` (for example, to tidy up or classify rows the helpers already found). Never require it. The demo and tests already treat it that way, and the code costs nothing unless it's called.
+- **If AI-level flexibility is needed on phones, it has to be a server-side model**, which is a privacy decision for transcripts. That doesn't need anything new in be-pdfing:
+  - **Any async function works:** a `handler` (or a `load` listener with `waitUntil`) can call your own endpoint with `fetch`.
+  - **Cloud models can plug in:** `promptForRecords` already accepts a `model` option (any object shaped like `LanguageModel`), so a small adapter for a cloud model could plug in behind the same call. Google's Firebase AI Logic offers a "hybrid" version of this idea, on-device when available and cloud otherwise.
+- So for the **declarative** support you mentioned, I'd prioritize the layout helpers over AI. That probably means a declarative form of `tables` (header pattern, `until`, column names), which covers both sample transcripts without any script or model.
+
+Sources:
+- [Chrome: Get started with built-in AI](https://developer.chrome.com/docs/ai/get-started)
+- [Chrome: Prompt API](https://developer.chrome.com/docs/ai/prompt-api)
+- [chrome-ai-dev-preview-discuss: availability of AI APIs in Chrome for Android](https://groups.google.com/a/chromium.org/g/chrome-ai-dev-preview-discuss/c/HKIndTczlPM)
+- [Decrypt: Chrome is quietly installing a 4GB AI model](https://decrypt.co/367060/chrome-quietly-installing-4gb-ai-model-computer)
+- [Thurrott: Google clarifies how Chrome's built-in AI features use local storage](https://www.thurrott.com/?p=335760)
+- [PCWorld: Chrome silently downloads a 4GB AI model](https://www.pcworld.com/article/3132803/chrome-silently-downloads-a-4gb-ai-model-heres-how-to-remove-it.html)
