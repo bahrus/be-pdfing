@@ -520,3 +520,198 @@ Sources:
 - [Decrypt: Chrome is quietly installing a 4GB AI model](https://decrypt.co/367060/chrome-quietly-installing-4gb-ai-model-computer)
 - [Thurrott: Google clarifies how Chrome's built-in AI features use local storage](https://www.thurrott.com/?p=335760)
 - [PCWorld: Chrome silently downloads a 4GB AI model](https://www.pcworld.com/article/3132803/chrome-silently-downloads-a-4gb-ai-model-heres-how-to-remove-it.html)
+
+## Bruce's Response -- no AI
+
+To my surprise, I opened my desktop Edge browsers (and Chrome Canary) to http://localhost:8000/demo/ai.html and they both say:
+
+Built-in AI: unavailable (needs a browser with the Prompt API, e.g. a recent Chrome on a capable device)
+
+Any idea why?
+
+
+## Claude's Response: why "unavailable"
+
+First, the demo was unhelpful here. It showed the same message for two different situations, so I've changed it to say which one applies. **Reload demo/ai.html in each browser** and it will now say one of:
+
+- **"this browser has no Prompt API (LanguageModel is undefined ...)"**: the API isn't turned on in this browser at all.
+- **"the browser has the Prompt API, but says the model can't run here ..."**: the API exists, but the browser's own checks (hardware, disk, policy, settings) said no.
+
+`localhost` counts as a secure context, so that isn't the problem.
+
+### Edge: the API isn't turned on
+
+I checked the Edge installed here (157) with Playwright: **`LanguageModel` is undefined**, so it's the first case. Edge's Prompt API (backed by Phi-4-mini rather than Gemini Nano) has been a developer preview behind a flag, the "Prompt API for Phi mini" entry in `edge://flags` (search for "Prompt API"). It isn't on by default in regular Edge, and the flag may only exist in Canary/Dev. Its hardware requirements also differ from Chrome's (as I recall, a GPU with more VRAM than Chrome asks for). I'm less sure about Edge's details than Chrome's.
+
+### Chrome Canary: probably the browser's own checks
+
+This machine looks capable on paper:
+
+| Requirement (Chrome docs) | This machine |
+|---------------------------|--------------|
+| 22 GB free on the profile's drive | 744 GB free |
+| GPU with more than 4 GB of VRAM, **or** 16 GB RAM + 4 CPU cores | Intel integrated graphics (Windows reports 2 GB, so not the GPU path), but **31 GB RAM and 16 logical CPUs, so the CPU path qualifies** |
+
+Playwright's Chromium (158) on this same machine reports `'downloadable'`, so the API and the hardware checks can pass here. If Canary reports the second message, the reason is specific to Canary or its profile. The quickest way to find it is **`chrome://on-device-internals`** in Canary. It shows the model's status, the "device performance class" Chrome assigned, and why the model isn't eligible. The usual suspects:
+
+- **The on-device AI setting is off** (Settings → System, in recent versions), or the `chrome://flags` entries for the on-device model / Prompt API are set to *Disabled*. Canary also sometimes runs experiments that turn features off.
+- **The performance class.** Chrome benchmarks the device and caches the result in the profile. A low result (for example, the GPU benchmark on integrated graphics) can make it say "unavailable" even though the CPU path should qualify. Older versions supported the GPU path only.
+- **An enterprise policy** (`GenAILocalFoundationalModelSettings`), if the machine is managed.
+
+If Canary shows the *first* message instead (no `LanguageModel` at all), that would surprise me, since Playwright's Chromium 158 has the API on by default. Then I'd check `chrome://flags` for a Prompt API entry set to *Disabled*.
+
+### Bigger picture
+
+None of this changes the conclusion from my last response. Even on a capable desktop, two out of two browsers here weren't ready to run this without fiddling with flags or settings. For a web page that has to work for ordinary users (and cheap phones), the built-in AI can be an occasional bonus at best, and the layout helpers have to carry the load.
+
+## Bruce's Response
+
+Chrome Canary shows:
+
+![alt text](image.png)
+
+I also explicitly enabled some flags:
+
+![alt text](image-1.png)
+
+but I still see 
+
+> Built-in AI: unavailable: the browser has the Prompt API, but says the model can't run here (hardware, free disk space, a policy, or the on-device AI setting). See chrome://on-device-internals. (Chromium 160, Google Chrome 160, Not)A;Brand 99)
+
+Any other suggestions?
+
+
+## Claude's Response: more suggestions
+
+Your screenshot rules out hardware: **"Device performance class: Very High"**. So Chrome thinks this machine can run the model, and the "unavailable" comes from something else. In order of likelihood:
+
+1. **The flags you enabled may be the problem now.** "Gemma 4 for Built-in AI" switches *all* the built-in AI APIs to a different model (Gemma 4 instead of Gemini Nano). "Decisions API: Enabled with Gemma", per its own description, forces Gemma 4 onto the CPU for all the APIs. If Canary can't serve Gemma 4 for the Prompt API yet, or not with the options we ask for, `availability()` would say "unavailable". **Set those two back to *Default*** (and Experimental Web Platform features too, since it isn't needed), restart Canary, and reload the demo.
+2. **Our options vs. a plain call.** be-pdfing asks `availability({expectedInputs: [{type: 'text', languages: ['en']}], expectedOutputs: [...]})`. A newer model or backend could say "unavailable" for those options while accepting a plain call. I've changed the demo so that when it reports "unavailable", it also shows what **`LanguageModel.availability()` with no options** returns. If that says `downloadable` or `available`, the options are the problem, and I'll fix `ai.js`.
+3. **The other two tabs of `chrome://on-device-internals`.** The **Event Logs** tab usually says *why* the model isn't eligible (for example, "not enough disk space", "enterprise policy", "model download not allowed", "feature not enabled"). The **Broker State** tab shows the state of each model (not ready, downloading, ready). Copying what those say here would pin it down.
+4. **The on-device AI setting.** Check Settings → System (in recent versions) for an "On-device AI" toggle that's turned off. That's the switch Google pointed to during the 4 GB download controversy. It's off if someone (or some cleanup tool) turned it off.
+5. **The model component.** `chrome://components` should list "Optimization Guide On Device Model". "Check for update" there can kick off the download if it's stuck at version 0.0.0.0.
+
+If none of that helps, it's probably just Canary. It's a nightly build, and its built-in AI is in flux (the Gemma 4 and Decisions flags show it's mid-transition). Regular Chrome would be a fairer test.
+
+## Bruce's Response
+
+I see this in the event log:
+
+
+Time	Source Location	Log Message
+7:11:12 AM	..\..\chrome\browser\contextual_cueing\contextual_cueing_controller.cc(505)	[cueing] Begin EvaluateCues for chrome://on-device-internals/
+7:11:12 AM	..\..\chrome\browser\contextual_cueing\contextual_cueing_controller.cc(510)	[cueing] chrome://on-device-internals/ ineligible for cue: URL is ineligible.
+7:11:12 AM	..\..\chrome\browser\contextual_cueing\contextual_cueing_controller.cc(1505)	[cueing] Decision: UrlNotEligible
+
+
+## Claude's Response: capturing the right log entries
+
+Those three lines are about an unrelated feature (contextual cueing deciding not to show a hint for the internals page itself). They don't tell us anything about the model. That's because **the Event Logs tab only records what happens while the page is open.** When you opened it, nothing had asked for the model yet.
+
+To capture the relevant entries:
+
+1. Open `chrome://on-device-internals` → **Event Logs**, and leave that tab open.
+2. In **another tab**, reload `http://localhost:8000/demo/ai.html`. Its `availability()` calls are what should produce log entries, typically from files with `optimization_guide`, `on_device_model` or `model_execution` in their path, with words like "eligibility", "not eligible", "disabled" or "unavailable".
+3. Switch back to the Event Logs tab and paste what appeared.
+
+Two other quick ones:
+
+- **Broker State** (the third tab): what does it say for the model(s)? For example, whether a model is installed, downloading or not ready, and its version.
+- **The demo's status line after reloading:** it now ends with `LanguageModel.availability() with no options: "..."`. What's in the quotes? If it isn't "unavailable", the problem is the options be-pdfing passes, and I can fix that on my side.
+
+(And if you haven't yet: set the Gemma 4 and Decisions API flags back to Default and restart Canary first. Otherwise we may be diagnosing the flags rather than the browser.)
+
+## Bruce's Response
+
+Nothing new appeared in the log.
+
+Browser shows:
+
+Built-in AI: unavailable: the browser has the Prompt API, but says the model can't run here (hardware, free disk space, a policy, flags, or the on-device AI setting). LanguageModel.availability() with no options: "unavailable". See chrome://on-device-internals. (Chromium 160, Google Chrome 160, Not)A;Brand 99)
+
+Here's the broker tab:
+
+![alt text](image-2.png)
+
+
+## Claude's Response: found it, the user setting is off
+
+The Broker State screenshot has the answer, under **Manifest Criteria**:
+
+| Criterion | Value |
+|-----------|-------|
+| Enabled by feature flag | true |
+| Enabled by enterprise policy | true |
+| **Enabled by user setting** | **false** ← this one |
+| Enough VRAM | true (18,344 MiB, i.e. shared memory on the integrated GPU; 3,000 required) |
+| Device capable | true |
+| Enough disk space to install / retain | true |
+
+Because of that one `false`, every use case (`prompt_api`, `summarizer_api`, even Chrome's own `scam_detection`) shows "Not Supported", no assets are installed, and `availability()` says "unavailable". The hardware is fine.
+
+**The fix:** in Canary, go to **Settings → System** (`chrome://settings/system`) and turn on the **On-device AI** toggle (it may be worded slightly differently). Then reload the demo. It should say `downloadable`, and "Enable built-in AI" will download the model (several GB, once).
+
+Whether that toggle is off by default in Canary, or got turned off somewhere along the way, I can't tell from here. Either way, it's one more reason this can't be relied on for end users. On a perfectly capable machine, a single user preference turns the whole API off, and a page can't tell that apart from "unsupported hardware". All it gets is "unavailable". So the README's advice stands: treat built-in AI as optional, and say *why* it might be unavailable. I'll add "the on-device AI setting is off" to the demo's message as the first thing to check, since it was the actual cause here.
+
+## Bruce's Response
+
+![alt text](image-3.png)
+
+
+## Claude's Response: where the setting lives
+
+Sorry, I sent you to the wrong page. In this Canary, System has no on-device AI toggle. Your screenshot does show a separate **AI innovations** entry in the sidebar, which is the most likely home for it now (it has moved between versions). In order:
+
+1. **Settings → AI innovations** (`chrome://settings/ai`). Look for something like "On-device AI", "On-device generative AI" or "Allow on-device AI models". It may sit inside a sub-page, so open any entries there.
+2. If it isn't there, type **`on-device`** (or just `AI`) into the **Search settings** box at the top. That searches every settings page, including ones I can't guess.
+3. If the toggle exists but won't turn on, or the AI innovations page is greyed out or missing options, eligibility may be tied to your **account or region**. Chrome's AI features have been restricted by things like being signed in, a supervised/under-18 account, or the region and language. `You and Google` would show the account.
+
+After changing it, reload `chrome://on-device-internals` → **Broker State**. "Enabled by user setting" should say `true`, and the use cases should change from "Not Supported". Then the demo should say `downloadable`.
+
+(I've changed the demo's message to point at "AI innovations / search for on-device" rather than System.)
+
+## Bruce's Response
+
+That worked.  It was a hefty download, which took maybe a minute to finish.
+
+It did successfully parse the pdf, but it took maybe another minute, during which time my fan started blasting hot fumes.  
+
+Seems like it could be a few years before this is a viable solution?
+
+
+## Claude's Response: is it viable?
+
+Good to have a real data point. For **this** job (turning a whole transcript into JSON), I agree: **not viable today, and probably not for a few years** for a general audience, and longer for cheap phones. A few things about the test are worth separating out, though:
+
+- **The flags probably made it worse.** "Decisions API: Enabled with Gemma" says, in its own description, that it *forces Gemma 4 onto the CPU for all built-in AI APIs*. If those flags were still on, the model ran on the CPU, which would explain both the minute and the fan. Setting both back to *Default* would give a fairer number (possibly GPU-backed, with your 18 GB of shared graphics memory). I'd still expect seconds rather than instant.
+- **Our prompt is the expensive kind.** Prompts are cheap for a model to read and slow for it to write, and we ask it to *write* ~30 course objects (~2,000 tokens of JSON). A small local model writes maybe 10–40 tokens per second, so a minute is about what you'd expect. Tasks that need a short answer ("which column is the grade?", "is this row a course or a summary?") would take a second or two.
+- **How accurate was it?** If you still have the page open, the summary line ("N of 31 exact, ... missing, ... extra") would be useful for the record. Speed is one problem. If it also dropped or invented rows, that's another reason to keep it out of the core path.
+
+### Where that leaves be-pdfing
+
+1. **Make the layout helpers the main path and leave the AI aside.** pdf.js plus `tables` handled both transcripts in milliseconds, deterministically, on any device. The AI code (`ai.js`, the AI demo and tests) can stay as an optional, documented extra, since it costs nothing unless it's used. Or I can move it out to a separate, clearly experimental module if you'd rather the package not suggest it.
+2. **If AI comes back later, use it for small tasks only.** Use it where layout logic struggles (labelling an unfamiliar table's columns, classifying odd rows), one small prompt at a time, with `tables` finding the rows. That's much faster, and it fails gracefully.
+3. **Next: declarative support for the layout helpers.** An attribute form of `tables`, along the lines of `{"tables": [{"header": "...", "until": "...", "columns": [...]}], "values": {"student": "Student:"}}`, would cover both sample transcripts with no script. That also fits the "server-rendered, no build step" spirit of the attribute API. I can sketch it here before implementing, the same way we did the handler.
+
+## Bruce's Response -- README update
+
+I experimented a bit, and I think my analysis still holds.
+
+Can you make sure the README.md's instructions for testing the AI capabilities are as helpful as possible based on what we found, and also flag that although there are some nice effects of this solution (not uploading the transcript to an AI service) it is still a rather rough solution that could benefit from waiting for the technologies to mature / improve?
+
+## Claude's Response: README updated
+
+Done. The changes in README.md:
+
+- **The AI section is now marked experimental** ("Using the browser's built-in AI in a handler (experimental)"). It opens with a warning box. The box gives the one real benefit (the transcript never goes to an AI service, because the model runs in the browser). Then it says plainly that the approach is rough today: about a minute and full fans for one two-page transcript, desktop Chrome only (no phones), several GB to download, fiddly setup, and output that varies and can drop or invent rows. It recommends the layout helpers and says to revisit the AI option as on-device models mature.
+- **A new "Trying the built-in AI" subsection** gives the steps we actually went through:
+  1. Desktop Chrome.
+  2. Hardware requirements.
+  3. Turning on on-device AI in settings (AI innovations in Canary, or search for "on-device"). This was the cause of our "unavailable".
+  4. chrome://on-device-internals → Broker State → Manifest Criteria to see which check fails.
+  5. Leaving the AI flags at Default, because some force the CPU.
+  6. The click-to-download button. The model is downloaded once per profile and shared across sites.
+  7. What the demo shows.
+- **A note that whole-document JSON prompts are the slow kind**, with the "small questions, `tables` finds the rows" compromise.
+- **Running Tests** now has copy-paste commands (bash and PowerShell) for the real-model test, the channel options (including `chrome-canary`), a reminder that the same settings toggle applies to its profile, and the pass thresholds.
+- The demo link under "Viewing Demos Locally" calls the AI page experimental and links to the setup steps.

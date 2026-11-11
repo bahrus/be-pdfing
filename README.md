@@ -164,7 +164,17 @@ handler: ({lines, helpers: {tables, num}}) => {
 }
 ```
 
-### Using the browser's built-in AI in a handler
+### Using the browser's built-in AI in a handler (experimental)
+
+> [!WARNING]
+> **This is a rough, experimental option, not the recommended path.** It has one real attraction: the transcript is never uploaded to an AI service, because the model runs inside the browser on the user's own device. But in our testing (late 2026), the technology isn't ready for this job:
+>
+> - **It's slow and hard on the hardware.** On a capable Windows laptop, extracting one two-page transcript took about a minute, with the fans at full speed. The model has to *write* every course as JSON (around 2,000 tokens), and small on-device models write slowly.
+> - **Few users can run it.** It needs desktop Chrome on a well-equipped machine and a one-time download of several GB. It doesn't run on phones, so it's no help for cheap smartphones. Other browsers don't support it, or only behind flags.
+> - **Setup is fiddly.** Even on supported hardware it may report "unavailable" until a browser setting is turned on (see [Trying it](#trying-the-built-in-ai) below).
+> - **The output isn't guaranteed.** Results vary from run to run, and the model can drop or invent rows.
+>
+> The layout helpers above produce the same records in milliseconds, give the same result every time, and work on any device. Use them. Revisit this option as on-device models get faster and smaller, and as more browsers and devices support them.
 
 Instead of layout logic, a handler can hand the text to the browser's built-in language model ([Chrome's Prompt API](https://developer.chrome.com/docs/ai/prompt-api), Gemini Nano), with a JSON Schema the response must match. pdf.js still does the reading. The model only sees text, and nothing leaves the device:
 
@@ -199,6 +209,19 @@ Things to know:
 - **The model download is several GB, and needs a user gesture.** `promptForRecords` deliberately won't start it, since picking a file would otherwise be enough to trigger it. It throws an `AIUnavailableError`, which the input reports as an `error` event. Offer a button that calls `createSession()` (see the [AI demo](demo/ai.html)), or pass `allowDownload: true`.
 - If the model is `'unavailable'` (an unsupported browser or device), `promptForRecords` throws an `AIUnavailableError` too. So does a response that isn't valid JSON.
 - The model's output varies from run to run, and a small on-device model can miss or invent rows. [demo/ai.html](demo/ai.html) shows its records next to the layout-helper handler's, and scores them against each other.
+- Expect a prompt like this one, which writes out a whole document as JSON, to take tens of seconds or more. A prompt that needs only a short answer is much faster. If you use the model at all, a good compromise is small questions (for example, "which of these columns is the grade?"), with `tables` still finding the rows.
+
+#### Trying the built-in AI
+
+What we found getting [demo/ai.html](demo/ai.html) to work:
+
+1. **Use desktop Chrome**, Stable or Canary. The Prompt API isn't available on Android or iOS. Edge has its own version (using Phi-4-mini), but at the time of writing only behind a flag in edge://flags, and Edge 157 didn't expose `LanguageModel` at all.
+2. **Check the hardware.** Chrome's [requirements](https://developer.chrome.com/docs/ai/get-started#hardware) include about 22 GB of free disk space, plus either a GPU with more than 4 GB of video memory or 16 GB of RAM and 4 or more CPU cores. Windows 10/11, macOS 13+ and Linux are supported.
+3. **Turn on on-device AI in Chrome's settings.** This was the cause of our "unavailable". Chrome reported the model as `'unavailable'` until the setting was on, even though the hardware qualified. In Canary it's under **Settings → AI innovations**. In other versions it may be under **System**, so the quickest way to find it is to search settings for "on-device".
+4. **If it's still unavailable, find out why.** Open chrome://on-device-internals, go to the **Broker State** tab, and look at **Manifest Criteria**. It lists each check (the user setting, disk space, the performance class, an enterprise policy) and whether it passes. The demo's status line also shows what `LanguageModel.availability()` returns.
+5. **Leave the AI flags in chrome://flags at Default** unless you need one. Some force the model onto the CPU (for example, "Decisions API: Enabled with Gemma", whose description says so), which makes it much slower and hotter.
+6. **Download the model by clicking "Enable built-in AI"** on the demo page. Chrome needs a click (a user gesture) to start the download. The model is several GB, and on a fast connection it took about a minute. It's downloaded once per browser profile and shared by every site, not once per site. Chrome may remove it if disk space runs low.
+7. **Pick a sample PDF** (`demo/home-school-transcript-example.pdf` or `demo/sample-transcript.pdf`) and wait. The page shows the elapsed time, the model's records next to the layout helpers' records with differences highlighted, and a score line ("N of 31 exact, ... missing, ... extra").
 
 ## Example 3: rules turn lines into records, without JavaScript
 
@@ -345,7 +368,7 @@ const records = applyRules(lines, rules);
 7. > npm run build
 8. > npm run serve
 9. Open http://localhost:8000/demo/ in a modern browser (Chrome/Edge 146+ -- JSON module imports with type assertion are required)
-   The built-in AI version is at http://localhost:8000/demo/ai.html.
+   The experimental built-in AI version is at http://localhost:8000/demo/ai.html (see [Trying the built-in AI](#trying-the-built-in-ai) for setup).
 
 `npm run serve` first copies pdf.js's two modules into `vendor/` as `.js` files, because the dev server (spa-ssi) treats `.mjs` requests as server-side includes rather than serving them as JavaScript. `imports.html` maps the pdf.js specifiers there.
 
@@ -355,4 +378,20 @@ const records = applyRules(lines, rules);
 > npm run test
 ```
 
-The built-in-AI tests (`AIHandler.spec.mjs`) use a fake `LanguageModel`, so they're deterministic and need no download. To run the handler against the **real** model, scored against the layout-helper handler, run `AIHandlerReal.spec.mjs` with `BE_PDFING_REAL_AI=1`. The first run downloads the model (several GB) into a persistent profile under `.ai-profile/`. The file's header comment lists the options (browser channel, profile, extra flags).
+The built-in-AI tests (`AIHandler.spec.mjs`) use a fake `LanguageModel`, so they're deterministic, fast, and need no download or special hardware.
+
+`AIHandlerReal.spec.mjs` runs the handler against the **real** model, scored against the layout-helper handler. It's skipped unless enabled, and it's slow (allow several minutes):
+
+```
+# bash
+BE_PDFING_REAL_AI=1 npx playwright test AIHandlerReal
+# PowerShell
+$env:BE_PDFING_REAL_AI='1'; npx playwright test AIHandlerReal
+```
+
+- It opens a visible browser with a persistent profile under `.ai-profile/<channel>/` (git-ignored). The first run downloads the model (several GB) into that profile. Later runs reuse it.
+- `BE_PDFING_AI_CHANNEL=chrome` (or `chrome-canary`, `msedge`) uses an installed browser instead of Playwright's bundled Chromium. `BE_PDFING_AI_PROFILE` and `BE_PDFING_AI_ARGS` set the profile folder and extra browser arguments. See the file's header comment.
+- The [setup steps above](#trying-the-built-in-ai) still apply. If the test reports `unavailable`, open that browser profile manually, turn on on-device AI in its settings, and check chrome://on-device-internals.
+- It passes if the model finds at least 80% of the courses and adds no more than 20% extra. Each run logs its scores.
+
+

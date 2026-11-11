@@ -58,9 +58,23 @@
 
         async function showAvailability(){
             const availability = await aiAvailability();
-            aiStatus.textContent = availability === 'unavailable'
-                ? 'unavailable (needs a browser with the Prompt API, e.g. a recent Chrome on a capable device)'
-                : availability;
+            const brands = navigator.userAgentData?.brands?.map(b => `${b.brand} ${b.version}`).join(', ') ?? navigator.userAgent;
+            if(!('LanguageModel' in globalThis)){
+                // Distinguish "no API" from "API, but the device/settings say no".
+                aiStatus.textContent = `unavailable: this browser has no Prompt API (LanguageModel is undefined; `
+                    + `secure context: ${isSecureContext}; ${brands}). It may need enabling in chrome://flags or edge://flags.`;
+            }else if(availability === 'unavailable'){
+                // be-pdfing asks about English text in/out; check whether a bare call differs.
+                let bare;
+                try{ bare = await LanguageModel.availability(); }catch(e){ bare = `threw ${e}`; }
+                aiStatus.textContent = `unavailable: the browser has the Prompt API, but says the model can't run here. `
+                    + `First check that on-device AI is turned on in Chrome's settings (Settings → AI innovations, or System in some versions; `
+                    + `search settings for "on-device"); `
+                    + `otherwise it's hardware, free disk space, a policy, or flags (chrome://on-device-internals → Broker State shows which). `
+                    + `LanguageModel.availability() with no options: "${bare}". See chrome://on-device-internals. (${brands})`;
+            }else{
+                aiStatus.textContent = availability;
+            }
             enable.hidden = !(availability === 'downloadable' || availability === 'downloading');
         }
         enable.addEventListener('click', async () => {
