@@ -715,3 +715,38 @@ Done. The changes in README.md:
 - **A note that whole-document JSON prompts are the slow kind**, with the "small questions, `tables` finds the rows" compromise.
 - **Running Tests** now has copy-paste commands (bash and PowerShell) for the real-model test, the channel options (including `chrome-canary`), a reminder that the same settings toggle applies to its profile, and the pass thresholds.
 - The demo link under "Viewing Demos Locally" calls the AI page experimental and links to the setup steps.
+
+## Bruce's Response -- Pink background
+
+This might be a feature rather than a bug, but I'm missing what the criteria is that is being used to highlight some rows in pink:
+
+![alt text](image-4.png)
+
+Any idea?
+
+## Claude's Response: what the pink means
+
+It's intended, but the page never explains it, which is a bug in the demo. **Pink marks a Built-in AI row that doesn't match any layout-helper row.** The layout-helper output is treated as the answer key. `compareCourses` in demo/transcriptHandlers.js pairs rows by **course name (lower-cased) + gradeLevel**. A pink row is either:
+
+- **extra**: no layout-helper row has the same course name and grade level, or
+- **mismatched**: the name and level match, but the grade or credits differ.
+
+The score line above the two tables ("N of 31 exact, ... missing, ... extra") counts the same things. Rows that are *missing* from the AI output have nowhere to show up in the AI table, so they aren't highlighted.
+
+In your screenshot, the pink rows come from four different things:
+
+| Row(s) | Why it's pink |
+|--------|---------------|
+| Honors Eng 9 / World Lit; Alg II/Trig (gr 8) / Algebra II/Trigonometry; Precalculus; Environmental Science | The model **split the name**: the transcript's text went into `courseCode`, and a shortened or expanded name went into `course`. The layout helpers keep the whole name in `course` (this transcript has no codes), so the names don't match. |
+| British Lit → "British Literature" | The model **expanded an abbreviation**, so the name no longer matches. |
+| Eng Comp 1 → "Engineering Composition I" | Same, but the expansion is **wrong**. It's English Composition. |
+| El Spanish 1 at grade 9 | **Wrong grade level.** The transcript has it under grade 10. |
+| From the second "Eng Comp 1" row down (Honors Eng 9:WorldLit with term 2015, gradeLevel 3 with term 209/201, ...) | The model **started over and repeated the transcript**, with invented values. These are all *extra*. |
+
+So some of the pink is real model error (the wrong expansion, the wrong grade level, the repeated rows). Some of it is the comparison being strict about where the name ends up.
+
+Suggested demo fixes (not done yet; say the word):
+
+1. **Add a legend** under the score line ("Pink: AI rows with no matching layout-helper row, or a different grade/credits"), and a tooltip on each pink row giving the reason ("extra", or "grade A vs B").
+2. **List the missing rows** below the AI table (greyed out), so all three categories are visible.
+3. **Make the matching a bit more forgiving.** Count a row as matching if `courseCode` or `course` equals the expected name, so a split name is treated as a formatting difference rather than a miss. Expanded abbreviations ("British Literature") would still count as different. I think that's right, because it's what a consumer of the JSON would see.
