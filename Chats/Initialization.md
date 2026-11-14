@@ -750,3 +750,7 @@ Suggested demo fixes (not done yet; say the word):
 1. **Add a legend** under the score line ("Pink: AI rows with no matching layout-helper row, or a different grade/credits"), and a tooltip on each pink row giving the reason ("extra", or "grade A vs B").
 2. **List the missing rows** below the AI table (greyed out), so all three categories are visible.
 3. **Make the matching a bit more forgiving.** Count a row as matching if `courseCode` or `course` equals the expected name, so a split name is treated as a formatting difference rather than a miss. Expanded abbreviations ("British Literature") would still count as different. I think that's right, because it's what a consumer of the JSON would see.
+
+## Bruce's Response
+
+Yes, please do these three items.
