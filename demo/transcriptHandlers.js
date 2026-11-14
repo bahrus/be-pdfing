@@ -102,11 +102,15 @@ export function deterministicHandler({lines, helpers}){
 /**
  * How well `actual` matches `expected`:  courses are matched one-to-one by
  * (course name, grade level); a match whose grade or credits differ is a mismatch.
+ *
+ * Where the name ends up is treated as formatting:  an actual course matches if its
+ * `course`, its `courseCode`, or the two joined ("Honors Eng 9" + "World Lit" =
+ * "Honors Eng 9: World Lit") equals the expected name (case and spacing ignored).
+ * A reworded name ("British Literature" for "British Lit") still doesn't match.
  * @param {{courses: Array<any>}} expected
  * @param {{courses: Array<any>}} actual
  */
 export function compareCourses(expected, actual){
-    const key = (/** @type {any} */ c) => `${String(c.course).toLowerCase().replace(/\s+/g, ' ').trim()}|${Number(c.gradeLevel)}`;
     const remaining = [...(actual.courses ?? [])];
     let exact = 0;
     /** @type {Array<{expected: any, actual: any}>} */
@@ -114,7 +118,9 @@ export function compareCourses(expected, actual){
     /** @type {Array<any>} */
     const missing = [];
     for(const e of expected.courses){
-        const i = remaining.findIndex(a => key(a) === key(e));
+        const wanted = namesOf(e);
+        const i = remaining.findIndex(a => Number(a.gradeLevel) === Number(e.gradeLevel)
+            && [...namesOf(a)].some(n => wanted.has(n)));
         if(i === -1){
             missing.push(e);
             continue;
@@ -124,4 +130,19 @@ export function compareCourses(expected, actual){
         else mismatched.push({expected: e, actual: a});
     }
     return {expected: expected.courses.length, exact, mismatched, missing, extra: remaining};
+}
+
+/**
+ * The normalized names a course could be matched by.
+ * @param {any} c
+ * @returns {Set<string>}
+ */
+function namesOf(c){
+    const norm = (/** @type {any} */ s) => String(s ?? '').toLowerCase().replace(/\s*:\s*/g, ': ').replace(/\s+/g, ' ').trim();
+    const code = norm(c.courseCode), course = norm(c.course);
+    const names = new Set([course, code, `${code}: ${course}`, `${code} ${course}`]);
+    names.delete('');
+    // A joined name with an empty half isn't a name.
+    for(const n of [...names]) if(n.startsWith(': ') || n.endsWith(':') || n !== n.trim()) names.delete(n);
+    return names;
 }

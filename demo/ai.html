@@ -12,6 +12,9 @@
         table { border-collapse: collapse; font-size: 0.8rem; margin-bottom: 1rem; }
         th, td { border: 1px solid #ccc; padding: 0.15rem 0.4rem; text-align: left; }
         .bad { background: #fde2e2; }
+        .missing { color: #888; font-style: italic; }
+        #legend { font-size: 0.9rem; }
+        #legend span { padding: 0 0.3rem; border: 1px solid #ccc; }
         #aiStatus { font-weight: 600; }
         #error { color: crimson; white-space: pre-wrap; }
     </style>
@@ -38,10 +41,17 @@
         <pre id="schemaText"></pre>
     </details>
     <h2 id="summary"></h2>
+    <p id="legend" hidden>
+        The layout helpers' records are the answer key. AI courses are paired with them by course name and grade level.
+        The name may be in <code>course</code>, in <code>courseCode</code>, or split across the two. Case and spacing are ignored, but rewording isn't.
+        <span class="bad">Pink</span>: an AI course with no match (extra), or a match whose grade or credits differ. Hover over a row for the reason.
+        <span class="missing">Grey italics</span>: courses the AI left out.
+    </p>
     <div class="panes">
         <section>
             <h2>Built-in AI</h2>
             <div id="aiRecords"></div>
+            <div id="missingRecords"></div>
         </section>
         <section>
             <h2>Layout helpers</h2>
@@ -96,7 +106,9 @@
             started = performance.now();
             error.textContent = '';
             summary.textContent = '';
+            legend.hidden = true;
             aiRecords.replaceChildren();
+            missingRecords.replaceChildren();
             expectedRecords.replaceChildren();
             timing.textContent = 'reading...';
         });
@@ -120,24 +132,50 @@
             summary.textContent = `Student: ${records.student === expected.student ? 'match' : `"${records.student}" vs "${expected.student}"`}.  `
                 + `Courses: ${c.exact} of ${c.expected} exact, ${c.mismatched.length} with a different grade/credits, `
                 + `${c.missing.length} missing, ${c.extra.length} extra.`;
-            render(aiRecords, records, new Set([...c.extra, ...c.mismatched.map(m => m.actual)]));
+            /** @type {Map<any, string>} why each flagged AI course is flagged */
+            const flagged = new Map();
+            for(const course of c.extra){
+                flagged.set(course, 'Extra: no layout-helper course has this name and grade level.');
+            }
+            for(const {expected: e, actual: a} of c.mismatched){
+                const diffs = [];
+                if(String(a.grade).trim() !== String(e.grade).trim()) diffs.push(`grade ${a.grade} vs ${e.grade}`);
+                if(Number(a.credits) !== Number(e.credits)) diffs.push(`credits ${a.credits} vs ${e.credits}`);
+                flagged.set(a, `Mismatch with "${e.course}": ${diffs.join(', ')} (AI vs layout helpers).`);
+            }
+            render(aiRecords, records, flagged);
+            legend.hidden = false;
+            if(c.missing.length > 0){
+                const h = document.createElement('h3');
+                h.textContent = `Missing from the AI's records (${c.missing.length})`;
+                missingRecords.append(h, courseTable(c.missing, new Map(), 'missing'));
+            }
         });
 
-        function render(container, records, flagged = new Set()){
+        const keys = ['gradeLevel', 'term', 'courseCode', 'course', 'grade', 'credits'];
+
+        function render(container, records, flagged = new Map()){
             container.replaceChildren();
             const h = document.createElement('h3');
             h.textContent = `student: ${records.student}`;
+            container.append(h, courseTable(records.courses ?? [], flagged));
+        }
+
+        function courseTable(courses, flagged, rowClass){
             const table = document.createElement('table');
-            const keys = ['gradeLevel', 'term', 'courseCode', 'course', 'grade', 'credits'];
             const head = table.createTHead().insertRow();
             for(const key of keys) head.insertCell().textContent = key;
             const body = table.createTBody();
-            for(const course of records.courses ?? []){
+            for(const course of courses){
                 const tr = body.insertRow();
-                if(flagged.has(course)) tr.className = 'bad';
+                if(rowClass) tr.className = rowClass;
+                if(flagged.has(course)){
+                    tr.className = 'bad';
+                    tr.title = flagged.get(course);
+                }
                 for(const key of keys) tr.insertCell().textContent = course[key] ?? '';
             }
-            container.append(h, table);
+            return table;
         }
     </script>
 </body>

@@ -751,6 +751,16 @@ Suggested demo fixes (not done yet; say the word):
 2. **List the missing rows** below the AI table (greyed out), so all three categories are visible.
 3. **Make the matching a bit more forgiving.** Count a row as matching if `courseCode` or `course` equals the expected name, so a split name is treated as a formatting difference rather than a miss. Expanded abbreviations ("British Literature") would still count as different. I think that's right, because it's what a consumer of the JSON would see.
 
-## Bruce's Response
+## Bruce's Response - Three Items
 
 Yes, please do these three items.
+
+## Claude's Implementation Notes: the three demo items
+
+All three are done. The tests pass (22 passed, 2 real-AI tests skipped).
+
+1. **Legend and tooltips** (demo/ai.html). A legend now appears under the score line once a file is processed. It says the layout helpers are the answer key, what pink means, and what grey italics mean. Each pink row has a tooltip with the reason. An extra row says "Extra: no layout-helper course has this name and grade level." A mismatched row names the matched course and lists the differences, e.g. `Mismatch with "Eng Comp 2": grade A vs B (AI vs layout helpers).`
+2. **Missing courses.** Below the AI table, a "Missing from the AI's records (N)" table lists the expected courses the model left out, in grey italics.
+3. **More forgiving matching** (`compareCourses` in demo/transcriptHandlers.js). Grade level must still be equal. The name now matches if it's in `course`, in `courseCode`, or split across the two (joined with a colon or a space, so "Honors Eng 9" + "World Lit" matches "Honors Eng 9: World Lit"). Case and spacing are ignored. Rewording ("British Literature", "Engineering Composition I") still doesn't match. The return shape is unchanged, so the AI tests and the score line work as before. New tests/CompareCourses.spec.mjs covers both sides.
+
+I couldn't run the real model here, so I haven't seen the new legend, tooltips or missing table on the page. When you next run demo/ai.html, the earlier screenshot should show fewer pink rows: the split names (Honors Eng 9, Alg II/Trig, Honors Precalculus (gr 9), Honors Environmental Science) should now match. The British Lit, Eng Comp, El Spanish 1 and repeated rows should stay pink, and the courses it skipped should appear in the missing table.
